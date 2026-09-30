@@ -21,7 +21,7 @@ PDFtoImage.Conversion.SavePng(
     page: 0);
 ```
 
-`SaveJpeg`, `SavePng`, `SaveWebp`, and `ToImage` render a single page. `ToImages` and `ToImagesAsync` render multiple pages.
+`SaveJpeg`, `SavePng`, `SaveWebp`, and `ToImage` render a single page. `ToImages` and `ToImagesAsync` render multiple pages. `PdfSession` keeps a document open so later pages skip another parse. `PdfSession.RenderPixels` returns packed BGRA, or 8-bit gray when `Grayscale` is set and tiling is not.
 
 Dispose returned `SKBitmap` instances after use. To save one, use [`SKBitmap.Encode`](https://learn.microsoft.com/en-us/dotnet/api/skiasharp.skbitmap.encode?view=skiasharp).
 

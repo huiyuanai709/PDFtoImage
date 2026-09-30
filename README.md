@@ -28,6 +28,25 @@ PDFtoImage.Conversion.SavePng(
 
 Dispose returned `SKBitmap` instances after use. To save one, use [`SKBitmap.Encode`](https://learn.microsoft.com/en-us/dotnet/api/skiasharp.skbitmap.encode?view=skiasharp).
 
+### Many pages from one PDF
+`ToImages` already parses the file once and renders every requested page from that document. `PdfSession` keeps the document open across calls, which avoids paying that parse again for `GetPageCount` plus a later render:
+
+```csharp
+using var session = PDFtoImage.PdfSession.Open(File.OpenRead("document.pdf"));
+
+for (var page = 0; page < session.PageCount; page++)
+{
+    using var pixels = session.RenderPixels(page, new PDFtoImage.RenderOptions(
+        Dpi: 120,
+        AntiAliasing: PDFtoImage.PdfAntiAliasing.None,
+        Grayscale: true));
+    // Grayscale without tiling returns packed Gray8 bytes (one byte per pixel, rows padded to 4).
+    // Those bytes match the BGRA grayscale image; alpha is omitted because it is 255.
+}
+```
+
+PDFium calls in a process take one shared lock. Extra threads calling `ToImages` on copies of the same PDF do not render faster, and each call parses the file again. Use one `PdfSession` on a single thread, or [PDFtoImage.Parallel](src/Parallel/README.md) when the work should use several cores. For a large PDF, `ProcessorTransferMode.MemoryMappedFile` keeps one shared file instead of copying the PDF into every worker. Opaque grayscale pages are transferred as 8-bit gray and expanded back to the same BGRA bitmap in the host.
+
 ### Unity project installation
 1. Open your project and navigate to `Window` → `Package Management` → `Package Manager`.
 1. Click on the `+` button (top-left corner) and select `Install package from git URL...`.

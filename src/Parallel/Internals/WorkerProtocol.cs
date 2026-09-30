@@ -189,11 +189,11 @@ namespace PDFtoImage.Parallel.Internals
                 throw new InvalidDataException("The rendered bitmap exceeds the IPC message limit.");
         }
 
-        internal static void WriteBitmapResponse(Stream stream, IntPtr pixels, int width, int height, int rowBytes)
+        internal static void WriteBitmapResponse(Stream stream, IntPtr pixels, int width, int height, int rowBytes, bool gray)
         {
             var byteCount = checked(rowBytes * height);
             ValidateIpcBitmapLength(byteCount);
-            var metadata = CreateBitmapMetadata(width, height, rowBytes, byteCount);
+            var metadata = CreateBitmapMetadata(width, height, rowBytes, byteCount, gray);
 
             stream.Write(BitConverter.GetBytes(metadata.Length + byteCount));
             stream.Write(metadata);
@@ -283,8 +283,8 @@ namespace PDFtoImage.Parallel.Internals
             WriteMessage(stream, CreateBitmapMetadata(bitmap));
         }
 
-        internal static void WriteMappedBitmapMetadataResponse(Stream stream, int width, int height, int rowBytes, int byteCount) =>
-            WriteMessage(stream, CreateBitmapMetadata(width, height, rowBytes, byteCount));
+        internal static void WriteMappedBitmapMetadataResponse(Stream stream, int width, int height, int rowBytes, int byteCount, bool gray) =>
+            WriteMessage(stream, CreateBitmapMetadata(width, height, rowBytes, byteCount, gray));
 
         internal static unsafe SKBitmap ReadMappedBitmap(byte[] payload, int offset, FileStream file)
         {
@@ -301,15 +301,13 @@ namespace PDFtoImage.Parallel.Internals
             var rowBytes = reader.ReadInt32();
             var byteCount = reader.ReadInt32();
 
-            if (width <= 0 || height <= 0 || colorType != SKColorType.Bgra8888 || alphaType != SKAlphaType.Premul ||
-                (long)width * 4 != rowBytes || (long)rowBytes * height != byteCount || byteCount <= 0 ||
-                file.Length != byteCount)
+            if (!IsSupportedBitmap(width, height, colorType, alphaType, rowBytes, byteCount) || file.Length != byteCount)
                 throw new InvalidDataException("A worker returned invalid mapped bitmap metadata.");
 
-            var bitmap = new SKBitmap(width, height, colorType, alphaType);
+            var bitmap = new SKBitmap(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
             try
             {
-                if (bitmap.RowBytes != rowBytes || bitmap.ByteCount != byteCount)
+                if (bitmap.RowBytes < checked(width * 4) || bitmap.ByteCount < checked(bitmap.RowBytes * height))
                     throw new InvalidDataException("A worker returned incompatible bitmap metadata.");
 
                 using var mapping = MemoryMappedFile.CreateFromFile(file, null, 0, MemoryMappedFileAccess.Read, HandleInheritability.None, leaveOpen: true);
@@ -318,7 +316,7 @@ namespace PDFtoImage.Parallel.Internals
                 try
                 {
                     view.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
-                    Buffer.MemoryCopy(pointer + view.PointerOffset, bitmap.GetPixels().ToPointer(), byteCount, byteCount);
+                    CopyToBgra(pointer + view.PointerOffset, byteCount, width, height, rowBytes, colorType, bitmap);
                 }
                 finally
                 {
@@ -335,13 +333,13 @@ namespace PDFtoImage.Parallel.Internals
             }
         }
 
-        private static byte[] CreateBitmapMetadata(int width, int height, int rowBytes, int byteCount) => CreateMessage(writer =>
+        private static byte[] CreateBitmapMetadata(int width, int height, int rowBytes, int byteCount, bool gray) => CreateMessage(writer =>
         {
             writer.Write((byte)WorkerResponse.Success);
             writer.Write(width);
             writer.Write(height);
-            writer.Write((int)SKColorType.Bgra8888);
-            writer.Write((int)SKAlphaType.Premul);
+            writer.Write((int)(gray ? SKColorType.Gray8 : SKColorType.Bgra8888));
+            writer.Write((int)(gray ? SKAlphaType.Opaque : SKAlphaType.Premul));
             writer.Write(rowBytes);
             writer.Write(byteCount);
         });
@@ -375,25 +373,75 @@ namespace PDFtoImage.Parallel.Internals
             var byteCount = reader.ReadInt32();
 
             // Validate using wide arithmetic BEFORE allocating native memory.
-            if (width <= 0 || height <= 0 || colorType != SKColorType.Bgra8888 || alphaType != SKAlphaType.Premul ||
-                (long)width * 4 != rowBytes || (long)rowBytes * height != byteCount ||
+            if (!IsSupportedBitmap(width, height, colorType, alphaType, rowBytes, byteCount) ||
                 byteCount != payload.Length - offset - metadataSize)
                 throw new InvalidDataException("A worker returned invalid bitmap metadata.");
 
-            var bitmap = new SKBitmap(width, height, colorType, alphaType);
+            var bitmap = new SKBitmap(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
 
             try
             {
-                if (bitmap.RowBytes != rowBytes || bitmap.ByteCount != byteCount)
+                if (bitmap.RowBytes < checked(width * 4) || bitmap.ByteCount < checked(bitmap.RowBytes * height))
                     throw new InvalidDataException("A worker returned incompatible bitmap metadata.");
 
-                Marshal.Copy(payload, offset + metadataSize, bitmap.GetPixels(), byteCount);
+                unsafe
+                {
+                    fixed (byte* source = &payload[offset + metadataSize])
+                        CopyToBgra(source, byteCount, width, height, rowBytes, colorType, bitmap);
+                }
+
                 return bitmap;
             }
             catch
             {
                 bitmap.Dispose();
                 throw;
+            }
+        }
+
+        private static bool IsSupportedBitmap(int width, int height, SKColorType colorType, SKAlphaType alphaType, int rowBytes, int byteCount)
+        {
+            if (width <= 0 || height <= 0 || rowBytes <= 0 || byteCount <= 0 || (long)rowBytes * height != byteCount)
+                return false;
+
+            if (colorType == SKColorType.Bgra8888 && alphaType == SKAlphaType.Premul)
+                return (long)width * 4 == rowBytes;
+
+            return colorType == SKColorType.Gray8 && alphaType == SKAlphaType.Opaque && rowBytes >= width;
+        }
+
+        private static unsafe void CopyToBgra(byte* source, int byteCount, int width, int height, int rowBytes, SKColorType colorType, SKBitmap bitmap)
+        {
+            if (colorType == SKColorType.Bgra8888)
+            {
+                if (bitmap.RowBytes == rowBytes && bitmap.ByteCount == byteCount)
+                    Buffer.MemoryCopy(source, bitmap.GetPixels().ToPointer(), byteCount, byteCount);
+                else
+                {
+                    var destination = (byte*)bitmap.GetPixels();
+
+                    for (var y = 0; y < height; y++)
+                        Buffer.MemoryCopy(source + (y * rowBytes), destination + (y * bitmap.RowBytes), bitmap.RowBytes, rowBytes);
+                }
+
+                return;
+            }
+
+            var target = (byte*)bitmap.GetPixels();
+
+            for (var y = 0; y < height; y++)
+            {
+                var src = source + (y * rowBytes);
+                var dst = target + (y * bitmap.RowBytes);
+
+                for (var x = 0; x < width; x++)
+                {
+                    var gray = src[x];
+                    dst[x * 4] = gray;
+                    dst[x * 4 + 1] = gray;
+                    dst[x * 4 + 2] = gray;
+                    dst[x * 4 + 3] = 255;
+                }
             }
         }
 

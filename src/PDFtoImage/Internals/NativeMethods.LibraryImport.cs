@@ -1,6 +1,5 @@
 ﻿#if NET6_0_OR_GREATER && !BROWSER
 using System;
-using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -73,68 +72,20 @@ namespace PDFtoImage.Internals
         [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
         private static int FPDF_GetBlock(IntPtr param, CULong position, IntPtr buffer, CULong size)
         {
-            byte[]? rentedBuffer = null;
-
             try
             {
                 var streamId = checked((int)param.ToInt64());
                 var nativePosition = position.Value.ToUInt64();
                 var nativeSize = size.Value.ToUInt64();
 
-                if (nativePosition > long.MaxValue)
+                if (nativePosition > long.MaxValue || nativeSize > int.MaxValue)
                     return 0;
 
-                if (nativeSize > int.MaxValue)
-                    return 0;
-
-                var positionConverted = (long)nativePosition;
-                var sizeConverted = (int)nativeSize;
-
-                if (sizeConverted == 0)
-                    return 1;
-
-                if (buffer == IntPtr.Zero)
-                    return 0;
-
-                var stream = StreamManager.Get(streamId);
-
-                if (stream == null || !stream.CanRead || !stream.CanSeek)
-                    return 0;
-
-                stream.Position = positionConverted;
-
-                rentedBuffer = ArrayPool<byte>.Shared.Rent(sizeConverted);
-
-                var totalRead = 0;
-
-                while (totalRead < sizeConverted)
-                {
-                    var read = stream.Read(rentedBuffer, totalRead, sizeConverted - totalRead);
-
-                    if (read <= 0)
-                        return 0;
-
-                    totalRead += read;
-                }
-
-                Marshal.Copy(rentedBuffer, 0, buffer, sizeConverted);
-
-                return 1;
+                return StreamManager.CopyBlock(streamId, (long)nativePosition, buffer, (int)nativeSize);
             }
             catch
             {
                 return 0;
-            }
-            finally
-            {
-                if (rentedBuffer != null)
-                {
-                    try
-                    {
-                        ArrayPool<byte>.Shared.Return(rentedBuffer, clearArray: false);
-                    }
-                    catch { }
-                }
             }
         }
 

@@ -11,6 +11,11 @@ namespace PDFtoImage.Internals
         private IntPtr _document;
         private IntPtr _form;
         private bool _disposed;
+#if NET9_0_OR_GREATER
+        private readonly System.Threading.Lock _formGate = new();
+#else
+        private readonly object _formGate = new();
+#endif
 
         // PDFium retains the FPDF_FORMFILLINFO pointer until the form handle is closed.
         private IntPtr _formFillInfoPtr;
@@ -76,12 +81,8 @@ namespace PDFtoImage.Internals
                 if (_document == IntPtr.Zero)
                     throw PdfException.CreateException(error) ?? new PdfUnknownException();
 
-                // Let the same availability context process form-related data before initializing
-                // the form-fill environment. PDF_FORM_NOTEXIST is a normal result, and there is no
-                // download cycle to drive because the complete stream is already available.
-                _ = NativeMethods.Avail_IsFormAvail(_avail);
-
-                (_form, _formFillInfoPtr) = CreateFormEnvironment(_document);
+                // Form-fill setup walks AcroForm data and is only needed when a render asks for it.
+                // Page content, annotations, and grayscale output do not require it.
             }
             catch
             {
@@ -138,7 +139,10 @@ namespace PDFtoImage.Internals
         {
             ThrowIfDisposed();
 
-            using var pageData = new PageData(this, pageNumber);
+            if (renderFormFill)
+                EnsureFormEnvironment();
+
+            using var pageData = new PageData(this, pageNumber, renderFormFill);
 
             NativeMethods.RenderPageBitmap(bitmapHandle, pageData.Page, boundsOriginX, boundsOriginY, boundsWidth, boundsHeight, rotate, flags);
 
@@ -146,6 +150,23 @@ namespace PDFtoImage.Internals
             {
                 NativeMethods.RemoveFormFieldHighlight(_form);
                 NativeMethods.FFLDraw(_form, bitmapHandle, pageData.Page, boundsOriginX, boundsOriginY, boundsWidth, boundsHeight, rotate, flags);
+            }
+        }
+
+        private void EnsureFormEnvironment()
+        {
+            if (_form != IntPtr.Zero)
+                return;
+
+            lock (_formGate)
+            {
+                if (_form != IntPtr.Zero || _disposed)
+                    return;
+
+                // PDF_FORM_NOTEXIST is a normal result. The complete stream is already available,
+                // so there is no download cycle to drive before creating the form environment.
+                _ = NativeMethods.Avail_IsFormAvail(_avail);
+                (_form, _formFillInfoPtr) = CreateFormEnvironment(_document);
             }
         }
 
@@ -202,7 +223,8 @@ namespace PDFtoImage.Internals
         {
             try
             {
-                DestroyFormEnvironment(ref _form, ref _formFillInfoPtr);
+                lock (_formGate)
+                    DestroyFormEnvironment(ref _form, ref _formFillInfoPtr);
             }
             finally
             {
@@ -258,22 +280,17 @@ namespace PDFtoImage.Internals
 
             public IntPtr Page { get; private set; }
 
-            public double Width { get; private set; }
-
-            public double Height { get; private set; }
-
-            public PageData(PdfFile file, int pageNumber)
+            public PageData(PdfFile file, int pageNumber, bool renderFormFill)
             {
                 var page = file.LoadPage(pageNumber);
-                _form = file._form;
+                _form = renderFormFill ? file._form : IntPtr.Zero;
 
                 try
                 {
                     Page = page;
-                    NativeMethods.OnAfterLoadPage(Page, _form);
 
-                    Width = NativeMethods.GetPageWidth(Page);
-                    Height = NativeMethods.GetPageHeight(Page);
+                    if (_form != IntPtr.Zero)
+                        NativeMethods.OnAfterLoadPage(Page, _form);
                 }
                 catch
                 {
@@ -297,7 +314,8 @@ namespace PDFtoImage.Internals
 
                 try
                 {
-                    NativeMethods.Form_OnBeforeClosePage(page, _form);
+                    if (_form != IntPtr.Zero)
+                        NativeMethods.Form_OnBeforeClosePage(page, _form);
                 }
                 finally
                 {
