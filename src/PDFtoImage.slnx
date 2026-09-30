@@ -32,6 +32,7 @@
     <File Path="../etc/Icon_128.png" />
     <File Path="../README.md" />
   </Folder>
+  <Project Path="Benchmarks/PDFtoImage.Benchmarks.csproj" />
   <Project Path="Parallel/Parallel.csproj" />
   <Project Path="PDFtoImage/PDFtoImage.csproj" />
   <Project Path="Tests/Tests.csproj">
