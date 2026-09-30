@@ -57,16 +57,20 @@ void Report(string name, Action action)
 {
     action();
     var samples = new long[runs];
+    var allocated = new long[runs];
     for (var i = 0; i < samples.Length; i++)
     {
+        var before = GC.GetTotalAllocatedBytes(precise: true);
         var watch = Stopwatch.StartNew();
         action();
         watch.Stop();
+        allocated[i] = GC.GetTotalAllocatedBytes(precise: true) - before;
         samples[i] = watch.ElapsedMilliseconds;
     }
 
     Array.Sort(samples);
-    Console.WriteLine($"{name,-52} median {samples[samples.Length / 2],6} ms   samples [{string.Join(", ", samples)}]");
+    Array.Sort(allocated);
+    Console.WriteLine($"{name,-52} median {samples[samples.Length / 2],6} ms   alloc {allocated[allocated.Length / 2] / 1024.0,8:F0} KiB   samples [{string.Join(", ", samples)}]");
 }
 
 void RenderSession(byte[] pdf, RenderOptions options)
@@ -158,16 +162,20 @@ async Task ReportSteadyParallel(string name, byte[] pdf, RenderOptions options, 
 
         await RenderOnce();
         var samples = new long[runs];
+        var allocated = new long[runs];
         for (var i = 0; i < samples.Length; i++)
         {
+            var before = GC.GetTotalAllocatedBytes(precise: true);
             var watch = Stopwatch.StartNew();
             await RenderOnce();
             watch.Stop();
+            allocated[i] = GC.GetTotalAllocatedBytes(precise: true) - before;
             samples[i] = watch.ElapsedMilliseconds;
         }
 
         Array.Sort(samples);
-        Console.WriteLine($"{name,-52} median {samples[samples.Length / 2],6} ms   samples [{string.Join(", ", samples)}]");
+        Array.Sort(allocated);
+        Console.WriteLine($"{name,-52} median {samples[samples.Length / 2],6} ms   alloc {allocated[allocated.Length / 2] / 1024.0,8:F0} KiB   samples [{string.Join(", ", samples)}]");
     }
     finally
     {

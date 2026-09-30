@@ -38,6 +38,8 @@
 		<LangVersion>latest</LangVersion>
 		<Nullable>enable</Nullable>
 		<Features>strict</Features>
+		<!-- Project references do not inherit the caller's Features. net11.0 is the only TFM whose runtime has runtime-async. -->
+		<Features Condition="'$(TargetFramework)' == 'net11.0'">$(Features);runtime-async=on</Features>
 		<WarningsAsErrors>nullable</WarningsAsErrors>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<SignAssembly>True</SignAssembly>
