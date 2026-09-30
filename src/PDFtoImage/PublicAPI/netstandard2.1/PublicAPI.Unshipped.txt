@@ -1,1 +1,17 @@
 ﻿#nullable enable
+PDFtoImage.PdfPixels
+PDFtoImage.PdfPixels.AlphaType.get -> SkiaSharp.SKAlphaType
+PDFtoImage.PdfPixels.ByteCount.get -> int
+PDFtoImage.PdfPixels.ColorType.get -> SkiaSharp.SKColorType
+PDFtoImage.PdfPixels.Dispose() -> void
+PDFtoImage.PdfPixels.Height.get -> int
+PDFtoImage.PdfPixels.Pixels.get -> System.ReadOnlyMemory<byte>
+PDFtoImage.PdfPixels.RowBytes.get -> int
+PDFtoImage.PdfPixels.Width.get -> int
+PDFtoImage.PdfSession
+PDFtoImage.PdfSession.Dispose() -> void
+PDFtoImage.PdfSession.PageCount.get -> int
+PDFtoImage.PdfSession.Render(int page, PDFtoImage.RenderOptions options = default(PDFtoImage.RenderOptions)) -> SkiaSharp.SKBitmap!
+PDFtoImage.PdfSession.RenderPages(System.Collections.Generic.IEnumerable<int>! pages, PDFtoImage.RenderOptions options = default(PDFtoImage.RenderOptions)) -> System.Collections.Generic.IEnumerable<SkiaSharp.SKBitmap!>!
+PDFtoImage.PdfSession.RenderPixels(int page, PDFtoImage.RenderOptions options = default(PDFtoImage.RenderOptions)) -> PDFtoImage.PdfPixels!
+static PDFtoImage.PdfSession.Open(System.IO.Stream! pdfStream, bool leaveOpen = false, string? password = null) -> PDFtoImage.PdfSession!
