@@ -1,4 +1,22 @@
 ﻿#nullable enable
+PDFtoImage.PdfPageAnalysis
+PDFtoImage.PdfPageAnalysis.Content.get -> PDFtoImage.PdfPageContentStats
+PDFtoImage.PdfPageAnalysis.PdfPageAnalysis() -> void
+PDFtoImage.PdfPageAnalysis.PdfPageAnalysis(PDFtoImage.PdfPageText text, PDFtoImage.PdfPageContentStats content) -> void
+PDFtoImage.PdfPageAnalysis.Text.get -> PDFtoImage.PdfPageText
+PDFtoImage.PdfPageContentStats
+PDFtoImage.PdfPageContentStats.ImageAreaCoverage.get -> double
+PDFtoImage.PdfPageContentStats.InvisibleTextObjectCount.get -> int
+PDFtoImage.PdfPageContentStats.PdfPageContentStats() -> void
+PDFtoImage.PdfPageContentStats.PdfPageContentStats(int textObjectCount, int invisibleTextObjectCount, double imageAreaCoverage) -> void
+PDFtoImage.PdfPageContentStats.TextObjectCount.get -> int
+PDFtoImage.PdfPageContentStats.TextObjectsAreInvisible.get -> bool
+PDFtoImage.PdfPageText
+PDFtoImage.PdfPageText.CharacterCount.get -> int
+PDFtoImage.PdfPageText.PdfPageText() -> void
+PDFtoImage.PdfPageText.PdfPageText(string! text, int characterCount, int unknownCharacterCount) -> void
+PDFtoImage.PdfPageText.Text.get -> string!
+PDFtoImage.PdfPageText.UnknownCharacterCount.get -> int
 PDFtoImage.PdfPixels
 PDFtoImage.PdfPixels.AlphaType.get -> SkiaSharp.SKAlphaType
 PDFtoImage.PdfPixels.ByteCount.get -> int
@@ -9,7 +27,10 @@ PDFtoImage.PdfPixels.Pixels.get -> System.ReadOnlyMemory<byte>
 PDFtoImage.PdfPixels.RowBytes.get -> int
 PDFtoImage.PdfPixels.Width.get -> int
 PDFtoImage.PdfSession
+PDFtoImage.PdfSession.AnalyzePage(int page) -> PDFtoImage.PdfPageAnalysis
 PDFtoImage.PdfSession.Dispose() -> void
+PDFtoImage.PdfSession.GetContentStats(int page) -> PDFtoImage.PdfPageContentStats
+PDFtoImage.PdfSession.GetText(int page) -> PDFtoImage.PdfPageText
 PDFtoImage.PdfSession.PageCount.get -> int
 PDFtoImage.PdfSession.Render(int page, PDFtoImage.RenderOptions options = default(PDFtoImage.RenderOptions)) -> SkiaSharp.SKBitmap!
 PDFtoImage.PdfSession.RenderPages(System.Collections.Generic.IEnumerable<int>! pages, PDFtoImage.RenderOptions options = default(PDFtoImage.RenderOptions)) -> System.Collections.Generic.IEnumerable<SkiaSharp.SKBitmap!>!

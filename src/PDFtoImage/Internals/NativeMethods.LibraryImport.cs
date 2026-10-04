@@ -15,6 +15,14 @@ namespace PDFtoImage.Internals
             }
         }
 
+        public static IntPtr FormObj_GetObject(IntPtr form, int index)
+        {
+            lock (LockString)
+            {
+                return Imports.FPDFFormObj_GetObject(form, new CULong((uint)index));
+            }
+        }
+
         public static bool GetPageSizeByIndex(IntPtr document, int page_index, out double width, out double height)
         {
             lock (LockString)
@@ -194,6 +202,50 @@ namespace PDFtoImage.Internals
             [LibraryImport("pdfium")]
             [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
             public static partial void FPDFDOC_ExitFormFillEnvironment(IntPtr handle);
+
+            [LibraryImport("pdfium")]
+            [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+            public static partial IntPtr FPDFText_LoadPage(IntPtr page);
+
+            [LibraryImport("pdfium")]
+            [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+            public static partial void FPDFText_ClosePage(IntPtr text_page);
+
+            [LibraryImport("pdfium")]
+            [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+            public static partial int FPDFText_CountChars(IntPtr text_page);
+
+            [LibraryImport("pdfium")]
+            [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+            public static partial uint FPDFText_GetUnicode(IntPtr text_page, int index);
+
+            [LibraryImport("pdfium")]
+            [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+            public static partial int FPDFPage_CountObjects(IntPtr page);
+
+            [LibraryImport("pdfium")]
+            [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+            public static partial IntPtr FPDFPage_GetObject(IntPtr page, int index);
+
+            [LibraryImport("pdfium")]
+            [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+            public static partial int FPDFPageObj_GetType(IntPtr page_object);
+
+            [LibraryImport("pdfium")]
+            [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+            public static partial int FPDFPageObj_GetBounds(IntPtr page_object, out float left, out float bottom, out float right, out float top);
+
+            [LibraryImport("pdfium")]
+            [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+            public static partial int FPDFTextObj_GetTextRenderMode(IntPtr text);
+
+            [LibraryImport("pdfium")]
+            [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+            public static partial int FPDFFormObj_CountObjects(IntPtr form_object);
+
+            [LibraryImport("pdfium")]
+            [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+            public static partial IntPtr FPDFFormObj_GetObject(IntPtr form_object, CULong index);
         }
 
         [StructLayout(LayoutKind.Sequential)]

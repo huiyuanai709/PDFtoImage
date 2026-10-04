@@ -170,6 +170,32 @@ namespace PDFtoImage.Internals
             }
         }
 
+        internal PdfPageInspector.Result InspectPage(int pageNumber)
+        {
+            ThrowIfDisposed();
+            var result = new PdfPageInspector.Result(string.Empty, 0, 0, 0, 0, 0);
+
+            NativeMethods.WithLock(() =>
+            {
+                ResolvePage(pageNumber);
+                var page = NativeMethods.LoadPage(_document, pageNumber, out var error);
+
+                if (page == IntPtr.Zero)
+                    throw PdfException.CreateException(error) ?? new PdfPageNotFoundException();
+
+                try
+                {
+                    result = PdfPageInspector.Inspect(page);
+                }
+                finally
+                {
+                    NativeMethods.ClosePage(page);
+                }
+            });
+
+            return result;
+        }
+
         public int GetPageCount()
         {
             ThrowIfDisposed();

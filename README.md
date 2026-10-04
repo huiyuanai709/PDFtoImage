@@ -45,6 +45,14 @@ for (var page = 0; page < session.PageCount; page++)
 }
 ```
 
+`AnalyzePage` reads that same open document once per page and returns the text layer plus image coverage, without rendering. `GetText` and `GetContentStats` are the same inspection split into two calls. A full-page image with no text, or with only invisible text (rendering mode 3, the usual hidden OCR layer), is a scan:
+
+```csharp
+var analysis = session.AnalyzePage(page);
+var needsOcr = analysis.Content.TextObjectsAreInvisible
+    || string.IsNullOrWhiteSpace(analysis.Text.Text);
+```
+
 PDFium calls in a process take one shared lock. Extra threads calling `ToImages` on copies of the same PDF do not render faster, and each call parses the file again. Use one `PdfSession` on a single thread, or [PDFtoImage.Parallel](src/Parallel/README.md) when the work should use several cores. For a large PDF, `ProcessorTransferMode.MemoryMappedFile` keeps one shared file instead of copying the PDF into every worker. Opaque grayscale pages are transferred as 8-bit gray and expanded back to the same BGRA bitmap in the host.
 
 ### Unity project installation
