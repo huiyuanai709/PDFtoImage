@@ -52,6 +52,14 @@ namespace PDFtoImage.Internals
         private const int MaxTileWidth = 4000;
         private const int MaxTileHeight = 4000;
 
+        internal PdfPageInspector.Result InspectPage(int page)
+        {
+            if (_disposed)
+                throw new ObjectDisposedException(GetType().Name);
+
+            return _file.InspectPage(page);
+        }
+
         internal static NativeMethods.FPDFRenderFlags GetRenderFlags(RenderOptions options)
         {
             NativeMethods.FPDFRenderFlags renderFlags = default;

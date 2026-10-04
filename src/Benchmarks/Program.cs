@@ -25,6 +25,11 @@ Console.WriteLine($"Text PDF: {textPages} pages, {textPdf.Length / 1024.0:F0} Ki
 Console.WriteLine($"Scan PDF: {scanPages} pages, {scanPdf.Length / (1024.0 * 1024.0):F1} MiB ({scanInfo})");
 Console.WriteLine();
 
+ReportAnalyze("plain AnalyzePage (one line, document open)", BuildTextPdf(textPages, 1));
+ReportAnalyze("dense AnalyzePage (48 lines, document open)", textPdf);
+ReportAnalyze("scan AnalyzePage (document already open)", scanPdf);
+Console.WriteLine();
+
 Report("text sequential ToImages (MemoryStream)", () => RenderAll(textPdf, options));
 Report("text reload every page (MemoryStream)", () => RenderReloading(textPdf, options));
 Report("text 2 workers, split pages, shared byte[]", () => RenderWorkers(textPdf, options, 2));
@@ -51,6 +56,42 @@ if (!skipParallel)
     await ReportSteadyParallel("scan Parallel IPC workers=4 steady", scanPdf, options, 4, ProcessorTransferMode.Ipc);
     await ReportSteadyParallel("scan Parallel MMF workers=1 steady", scanPdf, options, 1, ProcessorTransferMode.MemoryMappedFile);
     await ReportSteadyParallel("scan Parallel MMF workers=4 steady", scanPdf, options, 4, ProcessorTransferMode.MemoryMappedFile);
+}
+
+void ReportAnalyze(string name, byte[] pdf)
+{
+    using var stream = new MemoryStream(pdf, writable: false);
+    using var session = PdfSession.Open(stream, leaveOpen: true);
+    var pages = session.PageCount;
+
+    int Analyze()
+    {
+        var chars = 0;
+        for (var page = 0; page < pages; page++)
+            chars += session.AnalyzePage(page).Text.CharacterCount;
+        return chars;
+    }
+
+    var chars = Analyze();
+    var samples = new double[runs];
+    var allocated = new long[runs];
+    for (var i = 0; i < samples.Length; i++)
+    {
+        var before = GC.GetTotalAllocatedBytes(precise: true);
+        var watch = Stopwatch.StartNew();
+        if (Analyze() < 0)
+            throw new InvalidOperationException();
+        watch.Stop();
+        allocated[i] = GC.GetTotalAllocatedBytes(precise: true) - before;
+        samples[i] = watch.Elapsed.TotalMilliseconds;
+    }
+
+    Array.Sort(samples);
+    Array.Sort(allocated);
+    var median = samples[samples.Length / 2];
+    var perPage = pages == 0 ? 0 : median / pages;
+    var charsPerPage = pages == 0 ? 0 : chars / pages;
+    Console.WriteLine($"{name,-52} median {median,8:F2} ms   {perPage,7:F3} ms/page   {charsPerPage,6} chars/page   alloc {allocated[allocated.Length / 2] / 1024.0,8:F0} KiB   samples [{string.Join(", ", samples.Select(sample => sample.ToString("F2")))}]");
 }
 
 void Report(string name, Action action)
@@ -191,9 +232,10 @@ List<int>[] Split(int count, int workers)
     return ranges;
 }
 
-byte[] BuildTextPdf(int pageCount)
+byte[] BuildTextPdf(int pageCount, int linesPerPage = 48)
 {
-    var paragraph = string.Join(" ", Enumerable.Repeat("The quick brown fox jumps over the lazy dog 0123456789.", 30));
+    var sentence = "The quick brown fox jumps over the lazy dog 0123456789.";
+    var paragraph = linesPerPage == 1 ? sentence : string.Join(" ", Enumerable.Repeat(sentence, 30));
     using var output = new MemoryStream();
     var offsets = new List<long> { 0 };
     Write(output, "%PDF-1.4\n");
@@ -220,7 +262,7 @@ byte[] BuildTextPdf(int pageCount)
     {
         var content = new StringBuilder();
         content.Append("BT /F1 9 Tf 40 760 Td 14 TL ");
-        for (var line = 0; line < 48; line++)
+        for (var line = 0; line < linesPerPage; line++)
         {
             content.Append('(');
             content.Append("Page ");

@@ -111,6 +111,28 @@ namespace PDFtoImage
             return RenderBuffer(page, options, options.Grayscale && !options.UseTiling);
         }
 
+        /// <summary>
+        /// Extracts one page's text in reading order. The document stays open.
+        /// </summary>
+        /// <param name="page">The zero-based page number.</param>
+        public PdfPageText GetText(int page) => Inspect(page).Text;
+
+        /// <summary>
+        /// Counts text and image objects on one page. The document stays open.
+        /// </summary>
+        /// <param name="page">The zero-based page number.</param>
+        public PdfPageContentStats GetContentStats(int page) => Inspect(page).Content;
+
+        /// <summary>
+        /// Extracts text and content statistics from a single load of the page.
+        /// </summary>
+        /// <param name="page">The zero-based page number.</param>
+        public PdfPageAnalysis AnalyzePage(int page)
+        {
+            var result = Inspect(page);
+            return new PdfPageAnalysis(result.Text, result.Content);
+        }
+
         /// <summary>Closes the PDF and releases native resources.</summary>
         public void Dispose()
         {
@@ -119,6 +141,16 @@ namespace PDFtoImage
 
             _disposed = true;
             _document.Dispose();
+        }
+
+        private PdfPageAnalysis Inspect(int page)
+        {
+            ThrowIfDisposed();
+            EnsurePageInRange(page);
+            var result = _document.InspectPage(page);
+            return new PdfPageAnalysis(
+                new PdfPageText(result.Text, result.CharacterCount, result.UnknownCharacterCount),
+                new PdfPageContentStats(result.TextObjectCount, result.InvisibleTextObjectCount, result.ImageAreaCoverage));
         }
 
         private IEnumerable<SKBitmap> RenderValidated(int[] pages, RenderOptions options)

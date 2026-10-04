@@ -259,6 +259,103 @@ namespace PDFtoImage.Internals
             }
         }
 
+        // Holds the process-wide PDFium lock for a whole page inspection so LoadPage,
+        // text extraction, and object walks cannot interleave with another caller.
+        internal static void WithLock(Action action)
+        {
+            lock (LockString)
+                action();
+        }
+
+        public static IntPtr Text_LoadPage(IntPtr page)
+        {
+            lock (LockString)
+            {
+                return Imports.FPDFText_LoadPage(page);
+            }
+        }
+
+        public static void Text_ClosePage(IntPtr textPage)
+        {
+            lock (LockString)
+            {
+                Imports.FPDFText_ClosePage(textPage);
+            }
+        }
+
+        public static int Text_CountChars(IntPtr textPage)
+        {
+            lock (LockString)
+            {
+                return Imports.FPDFText_CountChars(textPage);
+            }
+        }
+
+        public static uint Text_GetUnicode(IntPtr textPage, int index)
+        {
+            lock (LockString)
+            {
+                return Imports.FPDFText_GetUnicode(textPage, index);
+            }
+        }
+
+        public static int Text_GetText(IntPtr textPage, int startIndex, int count, IntPtr result)
+        {
+            lock (LockString)
+            {
+                return Imports.FPDFText_GetText(textPage, startIndex, count, result);
+            }
+        }
+
+        public static int Page_CountObjects(IntPtr page)
+        {
+            lock (LockString)
+            {
+                return Imports.FPDFPage_CountObjects(page);
+            }
+        }
+
+        public static IntPtr Page_GetObject(IntPtr page, int index)
+        {
+            lock (LockString)
+            {
+                return Imports.FPDFPage_GetObject(page, index);
+            }
+        }
+
+        public static int PageObj_GetType(IntPtr pageObject)
+        {
+            lock (LockString)
+            {
+                return Imports.FPDFPageObj_GetType(pageObject);
+            }
+        }
+
+        public static bool PageObj_GetBounds(IntPtr pageObject, out float left, out float bottom, out float right, out float top)
+        {
+            lock (LockString)
+            {
+                return Imports.FPDFPageObj_GetBounds(pageObject, out left, out bottom, out right, out top) != 0;
+            }
+        }
+
+        public static int TextObj_GetTextRenderMode(IntPtr textObject)
+        {
+            lock (LockString)
+            {
+                // Returns an FPDF_TEXTRENDERMODE_* value, or -1 when the object is not text.
+                return Imports.FPDFTextObj_GetTextRenderMode(textObject);
+            }
+        }
+
+        public static int FormObj_CountObjects(IntPtr formObject)
+        {
+            lock (LockString)
+            {
+                return Imports.FPDFFormObj_CountObjects(formObject);
+            }
+        }
+
         public static void RenderPageBitmap(IntPtr bitmap, IntPtr page, int start_x, int start_y, int size_x, int size_y, int rotate, FPDFRenderFlags flags)
         {
             lock (LockString)

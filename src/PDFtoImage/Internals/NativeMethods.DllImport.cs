@@ -16,6 +16,14 @@ namespace PDFtoImage.Internals
             }
         }
 
+        public static IntPtr FormObj_GetObject(IntPtr form, int index)
+        {
+            lock (LockString)
+            {
+                return Imports.FPDFFormObj_GetObject(form, (uint)index);
+            }
+        }
+
         public static bool GetPageSizeByIndex(IntPtr document, int page_index, out double width, out double height)
         {
             lock (LockString)
@@ -217,6 +225,43 @@ namespace PDFtoImage.Internals
 
             [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
             public static extern void FPDFDOC_ExitFormFillEnvironment(IntPtr handle);
+
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern IntPtr FPDFText_LoadPage(IntPtr page);
+
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern void FPDFText_ClosePage(IntPtr text_page);
+
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern int FPDFText_CountChars(IntPtr text_page);
+
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern uint FPDFText_GetUnicode(IntPtr text_page, int index);
+
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern int FPDFText_GetText(IntPtr text_page, int start_index, int count, IntPtr result);
+
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern int FPDFPage_CountObjects(IntPtr page);
+
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern IntPtr FPDFPage_GetObject(IntPtr page, int index);
+
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern int FPDFPageObj_GetType(IntPtr page_object);
+
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern int FPDFPageObj_GetBounds(IntPtr page_object, out float left, out float bottom, out float right, out float top);
+
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern int FPDFTextObj_GetTextRenderMode(IntPtr text);
+
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern int FPDFFormObj_CountObjects(IntPtr form_object);
+
+            // unsigned long is 32-bit on Windows and on WebAssembly.
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern IntPtr FPDFFormObj_GetObject(IntPtr form_object, uint index);
 #pragma warning restore SYSLIB1054
 #pragma warning restore IDE0079
         }
