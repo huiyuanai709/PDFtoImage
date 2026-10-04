@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Runtime.InteropServices;
 
 namespace PDFtoImage.Internals
 {
@@ -83,6 +84,13 @@ namespace PDFtoImage.Internals
 
                 // A supplementary-plane character becomes two UTF-16 code units.
                 rented = ArrayPool<char>.Shared.Rent(checked(count * 2));
+
+                // One native call when every character is a single BMP scalar.
+                // GetText omits unmapped and non-UCS-2 characters, so a length
+                // mismatch falls through to the per-character read.
+                if (TryReadBulk(textPage, rented, count, out var bulkText, out var bulkUnknown))
+                    return (bulkText, count, bulkUnknown);
+
                 var length = 0;
                 var unknown = 0;
 
@@ -123,6 +131,46 @@ namespace PDFtoImage.Internals
 
                 NativeMethods.Text_ClosePage(textPage);
             }
+        }
+
+        private static bool TryReadBulk(IntPtr textPage, char[] rented, int count, out string text, out int unknown)
+        {
+            text = string.Empty;
+            unknown = 0;
+            var handle = GCHandle.Alloc(rented, GCHandleType.Pinned);
+            int written;
+
+            try
+            {
+                written = NativeMethods.Text_GetText(textPage, 0, count, handle.AddrOfPinnedObject());
+            }
+            finally
+            {
+                handle.Free();
+            }
+
+            // The return value includes the trailing NUL. Supplementary-plane characters
+            // and characters with no Unicode mapping are left out, so the only buffer
+            // that accounts for every character is one BMP scalar per index.
+            if (written != count + 1 || rented[count] != '\0')
+                return false;
+
+            var replacement = 0;
+
+            for (var i = 0; i < count; i++)
+            {
+                var unit = rented[i];
+
+                if (unit == '\0' || (unit >= '\uD800' && unit <= '\uDFFF'))
+                    return false;
+
+                if (unit == '\uFFFD')
+                    replacement++;
+            }
+
+            text = new string(rented, 0, count);
+            unknown = replacement;
+            return true;
         }
 
         private static bool IsUnknown(uint codePoint) =>

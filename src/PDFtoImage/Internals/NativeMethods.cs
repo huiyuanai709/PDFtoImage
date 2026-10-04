@@ -299,6 +299,14 @@ namespace PDFtoImage.Internals
             }
         }
 
+        public static int Text_GetText(IntPtr textPage, int startIndex, int count, IntPtr result)
+        {
+            lock (LockString)
+            {
+                return Imports.FPDFText_GetText(textPage, startIndex, count, result);
+            }
+        }
+
         public static int Page_CountObjects(IntPtr page)
         {
             lock (LockString)

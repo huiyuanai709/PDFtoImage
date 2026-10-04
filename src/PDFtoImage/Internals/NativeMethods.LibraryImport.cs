@@ -221,6 +221,10 @@ namespace PDFtoImage.Internals
 
             [LibraryImport("pdfium")]
             [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+            public static partial int FPDFText_GetText(IntPtr text_page, int start_index, int count, IntPtr result);
+
+            [LibraryImport("pdfium")]
+            [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
             public static partial int FPDFPage_CountObjects(IntPtr page);
 
             [LibraryImport("pdfium")]

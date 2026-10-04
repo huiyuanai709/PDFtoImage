@@ -239,6 +239,9 @@ namespace PDFtoImage.Internals
             public static extern uint FPDFText_GetUnicode(IntPtr text_page, int index);
 
             [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern int FPDFText_GetText(IntPtr text_page, int start_index, int count, IntPtr result);
+
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
             public static extern int FPDFPage_CountObjects(IntPtr page);
 
             [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]

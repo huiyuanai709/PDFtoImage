@@ -25,7 +25,8 @@ Console.WriteLine($"Text PDF: {textPages} pages, {textPdf.Length / 1024.0:F0} Ki
 Console.WriteLine($"Scan PDF: {scanPages} pages, {scanPdf.Length / (1024.0 * 1024.0):F1} MiB ({scanInfo})");
 Console.WriteLine();
 
-ReportAnalyze("text AnalyzePage (document already open)", textPdf);
+ReportAnalyze("plain AnalyzePage (one line, document open)", BuildTextPdf(textPages, 1));
+ReportAnalyze("dense AnalyzePage (48 lines, document open)", textPdf);
 ReportAnalyze("scan AnalyzePage (document already open)", scanPdf);
 Console.WriteLine();
 
@@ -71,7 +72,7 @@ void ReportAnalyze(string name, byte[] pdf)
         return chars;
     }
 
-    _ = Analyze();
+    var chars = Analyze();
     var samples = new double[runs];
     var allocated = new long[runs];
     for (var i = 0; i < samples.Length; i++)
@@ -88,7 +89,9 @@ void ReportAnalyze(string name, byte[] pdf)
     Array.Sort(samples);
     Array.Sort(allocated);
     var median = samples[samples.Length / 2];
-    Console.WriteLine($"{name,-52} median {median,8:F2} ms   {median / pages,7:F3} ms/page   alloc {allocated[allocated.Length / 2] / 1024.0,8:F0} KiB   samples [{string.Join(", ", samples.Select(sample => sample.ToString("F2")))}]");
+    var perPage = pages == 0 ? 0 : median / pages;
+    var charsPerPage = pages == 0 ? 0 : chars / pages;
+    Console.WriteLine($"{name,-52} median {median,8:F2} ms   {perPage,7:F3} ms/page   {charsPerPage,6} chars/page   alloc {allocated[allocated.Length / 2] / 1024.0,8:F0} KiB   samples [{string.Join(", ", samples.Select(sample => sample.ToString("F2")))}]");
 }
 
 void Report(string name, Action action)
@@ -229,9 +232,10 @@ List<int>[] Split(int count, int workers)
     return ranges;
 }
 
-byte[] BuildTextPdf(int pageCount)
+byte[] BuildTextPdf(int pageCount, int linesPerPage = 48)
 {
-    var paragraph = string.Join(" ", Enumerable.Repeat("The quick brown fox jumps over the lazy dog 0123456789.", 30));
+    var sentence = "The quick brown fox jumps over the lazy dog 0123456789.";
+    var paragraph = linesPerPage == 1 ? sentence : string.Join(" ", Enumerable.Repeat(sentence, 30));
     using var output = new MemoryStream();
     var offsets = new List<long> { 0 };
     Write(output, "%PDF-1.4\n");
@@ -258,7 +262,7 @@ byte[] BuildTextPdf(int pageCount)
     {
         var content = new StringBuilder();
         content.Append("BT /F1 9 Tf 40 760 Td 14 TL ");
-        for (var line = 0; line < 48; line++)
+        for (var line = 0; line < linesPerPage; line++)
         {
             content.Append('(');
             content.Append("Page ");
