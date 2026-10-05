@@ -30,12 +30,12 @@ namespace PDFtoImage.Parallel.Internals
             return global::PDFtoImage.Conversion.ToImagesImpl(_document, options, [page]).Single();
         }
 
-        internal void Render(int page, RenderOptions options, Func<int, int, (IntPtr Pixels, int RowBytes)> getPixels)
+        internal void Render(int page, RenderOptions options, Func<int, int, (IntPtr Pixels, int RowBytes)> getPixels, bool grayBitmap = false)
         {
             if (page < 0 || page >= PageCount)
                 throw new ArgumentOutOfRangeException(nameof(page));
 
-            _document.Render(page, options, getPixels);
+            _document.Render(page, options, getPixels, grayBitmap: grayBitmap);
         }
 
         public void Dispose()

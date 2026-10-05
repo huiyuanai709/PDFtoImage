@@ -1,1 +1,5 @@
 #nullable enable
+PDFtoImage.Parallel.ProcessorOptions.RetainDocuments.get -> bool
+PDFtoImage.Parallel.ProcessorOptions.RetainDocuments.init -> void
+PDFtoImage.Parallel.ProcessorOptions.ShareSourceFile.get -> bool
+PDFtoImage.Parallel.ProcessorOptions.ShareSourceFile.init -> void

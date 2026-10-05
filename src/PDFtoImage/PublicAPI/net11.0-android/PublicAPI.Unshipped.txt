@@ -35,6 +35,8 @@ PDFtoImage.PdfSession.PageCount.get -> int
 PDFtoImage.PdfSession.Render(int page, PDFtoImage.RenderOptions options = default(PDFtoImage.RenderOptions)) -> SkiaSharp.SKBitmap!
 PDFtoImage.PdfSession.RenderPages(System.Collections.Generic.IEnumerable<int>! pages, PDFtoImage.RenderOptions options = default(PDFtoImage.RenderOptions)) -> System.Collections.Generic.IEnumerable<SkiaSharp.SKBitmap!>!
 PDFtoImage.PdfSession.RenderPixels(int page, PDFtoImage.RenderOptions options = default(PDFtoImage.RenderOptions)) -> PDFtoImage.PdfPixels!
+PDFtoImage.RenderOptions.NativeGrayscale.get -> bool
+PDFtoImage.RenderOptions.NativeGrayscale.init -> void
 PDFtoImage.Resource
 PDFtoImage.Resource.Resource() -> void
 static PDFtoImage.PdfSession.Open(System.IO.Stream! pdfStream, bool leaveOpen = false, string? password = null) -> PDFtoImage.PdfSession!

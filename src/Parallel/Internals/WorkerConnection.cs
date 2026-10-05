@@ -22,6 +22,8 @@ namespace PDFtoImage.Parallel.Internals
 
         private Guid? _documentId;
 
+        private DocumentIdentity? _loadedIdentity;
+
         private int _pageCount;
 
         private int _documentLoadCount;
@@ -114,15 +116,25 @@ namespace PDFtoImage.Parallel.Internals
             if (reader.BaseStream.Position != reader.BaseStream.Length)
                 throw new InvalidDataException("The worker returned an invalid unload response.");
             _documentId = null;
+            _loadedIdentity = null;
             _pageCount = 0;
         }
 
         private async Task<int> LoadDocumentAsync(PdfRequest request, CancellationToken cancellationToken)
         {
+            if (request.Identity is { } identity && _loadedIdentity == identity)
+            {
+                // The previous request may still be unloading. Adopting the id makes that
+                // unload a no-op so it cannot close the document this request is using.
+                _documentId = request.Id;
+                return _pageCount;
+            }
+
             if (_documentId == request.Id)
                 return _pageCount;
 
             _documentId = null;
+            _loadedIdentity = null;
 
             try
             {
@@ -155,6 +167,7 @@ namespace PDFtoImage.Parallel.Internals
                     throw new InvalidDataException("The worker returned an invalid page count.");
 
                 _documentId = request.Id;
+                _loadedIdentity = request.Identity;
                 _documentLoadCount++;
 
                 return _pageCount;

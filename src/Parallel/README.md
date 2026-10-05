@@ -104,6 +104,21 @@ await using var converter = new PDFtoImage.Parallel.ParallelPdfProcessor(
 
 Workers read the same PDF file. The host copies each mapped bitmap into the returned `SKBitmap` and removes its temporary file before returning it. Throughput depends on PDF size, output size, and temporary-storage performance; benchmark both modes for your workload.
 
+## Short page-range leases
+When each call renders only a few pages of a PDF that already lives on disk, the default IPC mode still copies the whole file into the worker. `ShareSourceFile` opens that path in the worker and still returns bitmaps through the pipe. `RetainDocuments` keeps the opened file PDF in the worker when the path, length, last-write time, and password match, so the next lease skips parsing it again. Both default to `false`.
+
+```csharp
+await using var converter = new PDFtoImage.Parallel.ParallelPdfProcessor(
+    new PDFtoImage.Parallel.ProcessorOptions
+    {
+        WorkerCount = 4,
+        ShareSourceFile = true,
+        RetainDocuments = true
+    });
+```
+
+Keep the same processor across leases. A new processor pays worker startup again. The file must stay unchanged while a worker has it open; changing its length or last-write time makes the next call reload it. Non-file streams are still copied. `MemoryMappedFile` already avoids the PDF copy for a readable `FileStream` and does not need `ShareSourceFile`.
+
 ## Technical considerations
 ### Worker pool and lifetime
 Workers start on demand and are reused until the processor is disposed. Set `WorkerCount` to control the pool size. Set `SlotCount` to a positive number to cap simultaneous worker operations across requests; its default `null` leaves the worker count as the only limit. The ordered page scheduler also limits its look-ahead to this setting. This provides backpressure for services with a large worker pool.

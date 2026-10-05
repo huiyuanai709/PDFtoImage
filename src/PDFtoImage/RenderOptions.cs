@@ -38,6 +38,16 @@ namespace PDFtoImage
         bool Grayscale = false) : IRenderOptions
     {
         /// <summary>
+        /// When set together with <see cref="Grayscale"/>, <see cref="PdfSession.RenderPixels"/> and parallel workers
+        /// render into PDFium's 8-bit gray bitmap instead of packing a BGRA image.
+        /// Parallel <c>ToImage</c> results use those gray samples.
+        /// <see cref="Conversion"/> bitmap APIs ignore this flag and keep the exact BGRA grayscale image.
+        /// The native gray picture is not guaranteed to match that packed blue channel.
+        /// Tiled rendering ignores this flag.
+        /// </summary>
+        public bool NativeGrayscale { get; init; }
+
+        /// <summary>
         /// Constructs <see cref="RenderOptions"/> with default values.
         /// </summary>
         public RenderOptions() : this(300, null, null, false, false, false, PdfRotation.Rotate0, PdfAntiAliasing.All, null, null, false, false, false) { }
