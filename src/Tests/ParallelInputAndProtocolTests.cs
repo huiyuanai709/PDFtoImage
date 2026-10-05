@@ -175,7 +175,10 @@ namespace PDFtoImage.Tests
                 Bounds: new RectangleF(1.25f, 2.5f, 300.75f, 400.5f),
                 UseTiling: true,
                 DpiRelativeToBounds: true,
-                Grayscale: true);
+                Grayscale: true) with
+            {
+                NativeGrayscale = true
+            };
 
             var message = WorkerProtocol.CreateMessage(writer => WorkerProtocol.WriteRenderOptions(writer, expected));
             using var reader = WorkerProtocol.CreateReader(message);

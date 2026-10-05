@@ -282,6 +282,84 @@ namespace PDFtoImage.Tests
         }
 
         [TestMethod]
+        [DataRow(ProcessorTransferMode.Ipc)]
+        [DataRow(ProcessorTransferMode.MemoryMappedFile)]
+        public async Task NativeGrayscaleWorkersMatchInProcessGray(ProcessorTransferMode mode)
+        {
+            using var fixture = new FileFixture();
+            await using var processor = new ParallelPdfProcessor(new ProcessorOptions
+            {
+                WorkerCount = 1,
+                TransferMode = mode,
+                TempDirectory = fixture.TempDirectory,
+                ShareSourceFile = mode == ProcessorTransferMode.Ipc
+            });
+            var options = new RenderOptions(Dpi: 40, AntiAliasing: PdfAntiAliasing.None, Grayscale: true, Rotation: PdfRotation.Rotate90)
+            {
+                NativeGrayscale = true
+            };
+
+            using var actual = await processor.ToImageAsync(File.OpenRead(fixture.InputPath), leaveOpen: false, options: options, cancellationToken: TestContext!.CancellationToken);
+            using var session = PdfSession.Open(new MemoryStream(Pdf), leaveOpen: true);
+            using var native = session.RenderPixels(0, options);
+            var bitmap = actual.GetPixelSpan();
+            var gray = native.Pixels.Span;
+
+            Assert.AreEqual(native.Width, actual.Width);
+            Assert.AreEqual(native.Height, actual.Height);
+            Assert.AreEqual(SKColorType.Gray8, native.ColorType);
+            for (var y = 0; y < native.Height; y++)
+            {
+                var row = gray.Slice(y * native.RowBytes, native.Width);
+                var bgra = bitmap.Slice(y * actual.RowBytes, native.Width * 4);
+                for (var x = 0; x < native.Width; x++)
+                {
+                    var sample = row[x];
+                    Assert.AreEqual(sample, bgra[x * 4]);
+                    Assert.AreEqual(sample, bgra[x * 4 + 1]);
+                    Assert.AreEqual(sample, bgra[x * 4 + 2]);
+                    Assert.AreEqual(byte.MaxValue, bgra[x * 4 + 3]);
+                }
+            }
+        }
+
+        [TestMethod]
+        public async Task SharedFileIpcSkipsTheByteCopyAndCanRetainTheDocument()
+        {
+            using var fixture = new FileFixture();
+            await using var processor = new ParallelPdfProcessor(new ProcessorOptions
+            {
+                WorkerCount = 1,
+                ShareSourceFile = true,
+                RetainDocuments = true
+            });
+            var options = new RenderOptions(Dpi: 40);
+            using var source = File.OpenRead(fixture.InputPath);
+            source.Position = 4;
+
+            using (var image = await processor.ToImageAsync(source, leaveOpen: true, options: options, cancellationToken: TestContext!.CancellationToken))
+            using (var expected = Conversion.ToImage(Pdf, options: options))
+                AssertBitmapsEqual(expected, image);
+
+            Assert.AreEqual(4, source.Position);
+            Assert.IsEmpty(processor.TemporaryPdfPaths);
+            Assert.AreSequenceEqual([1], processor.WorkerDocumentLoadCounts);
+
+            using (var again = await processor.ToImageAsync(File.OpenRead(fixture.InputPath), leaveOpen: false, options: options, cancellationToken: TestContext.CancellationToken))
+            using (var expected = Conversion.ToImage(Pdf, options: options))
+                AssertBitmapsEqual(expected, again);
+
+            Assert.AreSequenceEqual([1], processor.WorkerDocumentLoadCounts);
+            Assert.IsTrue(processor.WorkerDocumentIds.All(id => id != null));
+
+            File.SetLastWriteTimeUtc(fixture.InputPath, DateTime.UtcNow.AddMinutes(5));
+            using var reloaded = await processor.ToImageAsync(File.OpenRead(fixture.InputPath), options: options, cancellationToken: TestContext.CancellationToken);
+            using var reloadedExpected = Conversion.ToImage(Pdf, options: options);
+            AssertBitmapsEqual(reloadedExpected, reloaded);
+            Assert.AreSequenceEqual([2], processor.WorkerDocumentLoadCounts);
+        }
+
+        [TestMethod]
         public async Task IpcModeStillCopiesFileStreamAndMappedReuseDoesNotDeleteSource()
         {
             using var fixture = new FileFixture();

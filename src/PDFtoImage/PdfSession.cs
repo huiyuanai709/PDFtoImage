@@ -94,9 +94,10 @@ namespace PDFtoImage
         /// <summary>
         /// Renders one page into a packed pixel buffer.
         /// <see cref="RenderOptions.Grayscale"/> without <see cref="RenderOptions.UseTiling"/> produces 8-bit gray
-        /// (<see cref="SKColorType.Gray8"/>). Each gray byte is the blue channel of the matching
-        /// <see cref="Render"/> bitmap, and for a grayscale render the red and green channels are the same value.
-        /// Every other combination produces premultiplied BGRA.
+        /// (<see cref="SKColorType.Gray8"/>). Without <see cref="RenderOptions.NativeGrayscale"/>, each gray byte is the
+        /// blue channel of the matching <see cref="Render"/> bitmap, and for a grayscale render the red and green
+        /// channels are the same value. <see cref="RenderOptions.NativeGrayscale"/> renders the gray buffer directly
+        /// and can differ from that packed channel. Every other combination produces premultiplied BGRA.
         /// </summary>
         /// <param name="page">The zero-based page number.</param>
         /// <param name="options">Render options. The default renders at 300 DPI.</param>
@@ -170,6 +171,7 @@ namespace PDFtoImage
             var height = 0;
             var rowBytes = 0;
             var pin = default(GCHandle);
+            var nativeGray = gray && options.NativeGrayscale && !options.UseTiling;
 
             try
             {
@@ -177,10 +179,10 @@ namespace PDFtoImage
                 {
                     width = renderWidth;
                     height = renderHeight;
-                    rowBytes = checked(renderWidth * 4);
+                    rowBytes = nativeGray ? GrayPixels.Stride(renderWidth) : checked(renderWidth * 4);
                     var byteCount = checked(rowBytes * renderHeight);
 
-                    if (gray)
+                    if (gray && !nativeGray)
                     {
                         rented = ArrayPool<byte>.Shared.Rent(byteCount);
                         pixels = rented;
@@ -192,7 +194,10 @@ namespace PDFtoImage
 
                     pin = GCHandle.Alloc(pixels, GCHandleType.Pinned);
                     return (pin.AddrOfPinnedObject(), rowBytes);
-                });
+                }, grayBitmap: nativeGray);
+
+                if (nativeGray)
+                    return new PdfPixels(pixels!, width, height, rowBytes, SKColorType.Gray8, SKAlphaType.Opaque);
 
                 if (!gray)
                 {

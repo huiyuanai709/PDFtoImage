@@ -82,6 +82,62 @@ namespace PDFtoImage.Tests
         }
 
         [TestMethod]
+        public void NativeGrayscaleIsOptInAndBitmapApisStayExact()
+        {
+            AssertNativeGrayMatchesPacked(AssetPath, new RenderOptions(Dpi: 72, AntiAliasing: PdfAntiAliasing.None, Grayscale: true));
+            var wikimedia = Path.Combine(AppContext.BaseDirectory, "..", "Assets", "Wikimedia_Commons_web.pdf");
+            AssertNativeGrayMatchesPacked(wikimedia, new RenderOptions(Dpi: 40, AntiAliasing: PdfAntiAliasing.None, Grayscale: true, Rotation: PdfRotation.Rotate90));
+            AssertNativeGrayMatchesPacked(wikimedia, new RenderOptions(Dpi: 130, AntiAliasing: PdfAntiAliasing.None, Grayscale: true));
+
+            var bytes = File.ReadAllBytes(AssetPath);
+            var exact = new RenderOptions(Dpi: 72, AntiAliasing: PdfAntiAliasing.None, Grayscale: true);
+            var native = exact with { NativeGrayscale = true };
+            using var flagged = Conversion.ToImage(new MemoryStream(bytes), leaveOpen: true, options: native);
+            using var unflagged = Conversion.ToImage(new MemoryStream(bytes), leaveOpen: true, options: exact);
+            AssertBitmapsEqual(unflagged, flagged);
+        }
+
+        private static void AssertNativeGrayMatchesPacked(string path, RenderOptions exact)
+        {
+            var bytes = File.ReadAllBytes(path);
+            var native = exact with { NativeGrayscale = true };
+
+            using var session = PdfSession.Open(new MemoryStream(bytes), leaveOpen: true);
+            using var exactPixels = session.RenderPixels(0, exact);
+            using var nativePixels = session.RenderPixels(0, native);
+
+            Assert.AreEqual(SKColorType.Gray8, exactPixels.ColorType);
+            Assert.AreEqual(SKColorType.Gray8, nativePixels.ColorType);
+            Assert.AreEqual(exactPixels.Width, nativePixels.Width);
+            Assert.AreEqual(exactPixels.Height, nativePixels.Height);
+
+            long sum = 0;
+            long level = 0;
+            var max = 0;
+            var count = 0;
+            var left = exactPixels.Pixels.Span;
+            var right = nativePixels.Pixels.Span;
+            for (var y = 0; y < exactPixels.Height; y++)
+            {
+                var leftRow = left.Slice(y * exactPixels.RowBytes, exactPixels.Width);
+                var rightRow = right.Slice(y * nativePixels.RowBytes, nativePixels.Width);
+                for (var x = 0; x < exactPixels.Width; x++)
+                {
+                    var delta = Math.Abs(leftRow[x] - rightRow[x]);
+                    sum += delta;
+                    level += rightRow[x];
+                    if (delta > max)
+                        max = delta;
+                    count++;
+                }
+            }
+
+            var mean = sum / (double)count;
+            Assert.IsGreaterThan(8d, level / (double)count, "Native grayscale rendered a blank page.");
+            Assert.AreEqual(0, max, $"{Path.GetFileName(path)} dpi {exact.Dpi} rot {exact.Rotation}: native grayscale differed. mean {mean:F2} max {max}");
+        }
+
+        [TestMethod]
         public void RenderPagesRejectsUnknownPageBeforeRendering()
         {
             using var session = PdfSession.Open(File.OpenRead(AssetPath), leaveOpen: false);

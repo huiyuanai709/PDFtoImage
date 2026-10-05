@@ -25,6 +25,8 @@ namespace PDFtoImage.Parallel
 
         private readonly bool _reuseFileStream;
 
+        private readonly bool _shareSourceFile;
+
         private readonly int? _maxParallelism;
 
         private readonly string _tempDirectory;
@@ -76,8 +78,9 @@ namespace PDFtoImage.Parallel
 
             _transferMode = options.TransferMode;
             _reuseFileStream = options.ReuseFileStream;
+            _shareSourceFile = options.ShareSourceFile;
             _maxParallelism = options.SlotCount;
-            _pool = new WorkerPool(count, options.SlotCount, options.TransferMode, _tempDirectory);
+            _pool = new WorkerPool(count, options.SlotCount, options.TransferMode, _tempDirectory, options.RetainDocuments);
         }
 
         internal int[] WorkerProcessIds => _pool.WorkerProcessIds;
@@ -303,6 +306,14 @@ namespace PDFtoImage.Parallel
             {
                 _pool.ThrowIfDisposed();
                 cancellationToken.ThrowIfCancellationRequested();
+                if (_transferMode == ProcessorTransferMode.Ipc && _shareSourceFile
+                    && pdfStream is FileStream shared && PdfInputReader.TryOpenSourceFile(shared) is FileStream sharedFile)
+                {
+                    result = new PdfRequest(sharedFile.Name, sharedFile, password, ReleaseFileRequest, deleteFile: false);
+                    RegisterFileRequest(result);
+                    return result;
+                }
+
                 if (_transferMode == ProcessorTransferMode.MemoryMappedFile)
                 {
                     if (_reuseFileStream && pdfStream is FileStream source && PdfInputReader.TryOpenSourceFile(source) is FileStream readable)

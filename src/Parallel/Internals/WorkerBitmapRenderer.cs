@@ -30,16 +30,23 @@ namespace PDFtoImage.Parallel.Internals
 
             try
             {
+                var nativeGray = UseNativeGray(options);
                 document.Render(page, options, (renderWidth, renderHeight) =>
                 {
                     width = renderWidth;
                     height = renderHeight;
-                    rowBytes = checked(width * 4);
+                    rowBytes = nativeGray ? GrayPixels.Stride(width) : checked(width * 4);
                     var byteCount = checked(rowBytes * height);
                     WorkerProtocol.ValidateIpcBitmapLength(byteCount);
                     pixels = Marshal.AllocHGlobal(byteCount);
                     return (pixels, rowBytes);
-                });
+                }, grayBitmap: nativeGray);
+
+                if (nativeGray)
+                {
+                    WorkerProtocol.WriteBitmapResponse(pipe, pixels, width, height, rowBytes, gray: true);
+                    return;
+                }
 
                 var gray = false;
 
@@ -74,10 +81,11 @@ namespace PDFtoImage.Parallel.Internals
 
         private static unsafe void RenderToFile(Stream pipe, WorkerDocument document, int page, RenderOptions options, string bitmapPath)
         {
-            if (!UseGray(options))
+            if (UseNativeGray(options) || !UseGray(options))
             {
-                var size = RenderBgraToFile(document, page, options, bitmapPath);
-                WorkerProtocol.WriteMappedBitmapMetadataResponse(pipe, size.Width, size.Height, size.RowBytes, size.ByteCount, gray: false);
+                var nativeGray = UseNativeGray(options);
+                var size = RenderDirectToFile(document, page, options, bitmapPath, nativeGray);
+                WorkerProtocol.WriteMappedBitmapMetadataResponse(pipe, size.Width, size.Height, size.RowBytes, size.ByteCount, gray: nativeGray);
                 return;
             }
 
@@ -124,7 +132,7 @@ namespace PDFtoImage.Parallel.Internals
             }
         }
 
-        private static unsafe (int Width, int Height, int RowBytes, int ByteCount) RenderBgraToFile(WorkerDocument document, int page, RenderOptions options, string bitmapPath)
+        private static unsafe (int Width, int Height, int RowBytes, int ByteCount) RenderDirectToFile(WorkerDocument document, int page, RenderOptions options, string bitmapPath, bool nativeGray)
         {
             var width = 0;
             var height = 0;
@@ -143,7 +151,7 @@ namespace PDFtoImage.Parallel.Internals
                 {
                     width = renderWidth;
                     height = renderHeight;
-                    rowBytes = checked(width * 4);
+                    rowBytes = nativeGray ? GrayPixels.Stride(width) : checked(width * 4);
                     byteCount = checked(rowBytes * height);
 
                     if (byteCount <= 0)
@@ -157,7 +165,7 @@ namespace PDFtoImage.Parallel.Internals
                     view.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
                     pointerAcquired = true;
                     return ((IntPtr)(pointer + view.PointerOffset), rowBytes);
-                });
+                }, grayBitmap: nativeGray);
             }
             finally
             {
@@ -204,6 +212,8 @@ namespace PDFtoImage.Parallel.Internals
             }
         }
 
-        private static bool UseGray(RenderOptions options) => options.Grayscale && !options.UseTiling;
+        private static bool UseGray(RenderOptions options) => options.Grayscale && !options.UseTiling && !options.NativeGrayscale;
+
+        private static bool UseNativeGray(RenderOptions options) => options.Grayscale && options.NativeGrayscale && !options.UseTiling;
     }
 }

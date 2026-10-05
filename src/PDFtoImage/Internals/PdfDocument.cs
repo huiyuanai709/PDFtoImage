@@ -106,21 +106,25 @@ namespace PDFtoImage.Internals
 
         // The callback runs after the output size is known so a worker can allocate or map
         // its final destination. PDFium then renders directly into the returned pointer.
-        internal void Render(int page, RenderOptions options, Func<int, int, (IntPtr Pixels, int RowBytes)> getPixels, CancellationToken cancellationToken = default)
+        // grayBitmap asks for PDFium's 8-bit gray target. Callers allocate that stride.
+        internal void Render(int page, RenderOptions options, Func<int, int, (IntPtr Pixels, int RowBytes)> getPixels, CancellationToken cancellationToken = default, bool grayBitmap = false)
         {
             if (options == default)
                 options = new();
 
+            if (grayBitmap && options.UseTiling)
+                throw new ArgumentException("Native grayscale cannot be combined with tiled rendering.", nameof(options));
+
             Render(page, options.Width, options.Height, options.Dpi, options.Dpi, options.Rotation,
                 GetRenderFlags(options), options.WithFormFill, options.BackgroundColor ?? SKColors.White,
                 options.Bounds, options.UseTiling, options.WithAspectRatio, options.DpiRelativeToBounds,
-                getPixels, cancellationToken);
+                getPixels, cancellationToken, grayBitmap ? NativeMethods.FPDFBitmap.Gray : NativeMethods.FPDFBitmap.BGRA);
         }
 
 #if NETCOREAPP
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Maintainability", "CA1513")]
 #endif
-        private void Render(int page, float? requestedWidth, float? requestedHeight, float dpiX, float dpiY, PdfRotation rotate, NativeMethods.FPDFRenderFlags flags, bool renderFormFill, SKColor backgroundColor, RectangleF? bounds, bool useTiling, bool withAspectRatio, bool dpiRelativeToBounds, Func<int, int, (IntPtr Pixels, int RowBytes)> getPixels, CancellationToken cancellationToken)
+        private void Render(int page, float? requestedWidth, float? requestedHeight, float dpiX, float dpiY, PdfRotation rotate, NativeMethods.FPDFRenderFlags flags, bool renderFormFill, SKColor backgroundColor, RectangleF? bounds, bool useTiling, bool withAspectRatio, bool dpiRelativeToBounds, Func<int, int, (IntPtr Pixels, int RowBytes)> getPixels, CancellationToken cancellationToken, NativeMethods.FPDFBitmap format = NativeMethods.FPDFBitmap.BGRA)
         {
             if (_disposed)
                 throw new ObjectDisposedException(GetType().Name);
@@ -261,8 +265,9 @@ namespace PDFtoImage.Internals
             var bitmapHeight = (int)height;
             cancellationToken.ThrowIfCancellationRequested();
             var (pixels, rowBytes) = getPixels(bitmapWidth, bitmapHeight);
-            if (pixels == IntPtr.Zero || bitmapWidth <= 0 || bitmapHeight <= 0 || rowBytes < checked(bitmapWidth * 4))
-                throw new ArgumentException("The destination must provide writable BGRA pixels for the rendered page.", nameof(getPixels));
+            var minRowBytes = format == NativeMethods.FPDFBitmap.Gray ? GrayPixels.Stride(bitmapWidth) : checked(bitmapWidth * 4);
+            if (pixels == IntPtr.Zero || bitmapWidth <= 0 || bitmapHeight <= 0 || rowBytes < minRowBytes)
+                throw new ArgumentException("The destination must provide a writable bitmap for the rendered page.", nameof(getPixels));
 
             int horizontalTileCount = (int)Math.Ceiling(width / MaxTileWidth);
             int verticalTileCount = (int)Math.Ceiling(height / MaxTileHeight);
@@ -270,7 +275,7 @@ namespace PDFtoImage.Internals
             if (!useTiling || (horizontalTileCount == 1 && verticalTileCount == 1))
             {
                 RenderSubset(_file, page, width, height, rotate, flags, renderFormFill, backgroundColor,
-                    bounds, originalWidth, originalHeight, pixels, rowBytes, cancellationToken);
+                    bounds, originalWidth, originalHeight, pixels, rowBytes, format, cancellationToken);
             }
             else
             {
@@ -352,7 +357,7 @@ namespace PDFtoImage.Internals
             try
             {
                 RenderSubset(file, page, width, height, rotate, flags, renderFormFill, backgroundColor,
-                    bounds, originalWidth, originalHeight, bitmap.GetPixels(), bitmap.RowBytes, cancellationToken);
+                    bounds, originalWidth, originalHeight, bitmap.GetPixels(), bitmap.RowBytes, NativeMethods.FPDFBitmap.BGRA, cancellationToken);
                 return bitmap;
             }
             catch
@@ -362,7 +367,7 @@ namespace PDFtoImage.Internals
             }
         }
 
-        private static void RenderSubset(PdfFile file, int page, float width, float height, PdfRotation rotate, NativeMethods.FPDFRenderFlags flags, bool renderFormFill, SKColor backgroundColor, RectangleF? bounds, float originalWidth, float originalHeight, IntPtr pixels, int rowBytes, CancellationToken cancellationToken)
+        private static void RenderSubset(PdfFile file, int page, float width, float height, PdfRotation rotate, NativeMethods.FPDFRenderFlags flags, bool renderFormFill, SKColor backgroundColor, RectangleF? bounds, float originalWidth, float originalHeight, IntPtr pixels, int rowBytes, NativeMethods.FPDFBitmap format, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             IntPtr handle = IntPtr.Zero;
@@ -370,7 +375,7 @@ namespace PDFtoImage.Internals
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                handle = NativeMethods.Bitmap_CreateEx((int)width, (int)height, NativeMethods.FPDFBitmap.BGRA, pixels, rowBytes, out var error);
+                handle = NativeMethods.Bitmap_CreateEx((int)width, (int)height, format, pixels, rowBytes, out var error);
 
                 if (handle == IntPtr.Zero)
                     throw PdfException.CreateException(error) ?? new PdfUnknownException();

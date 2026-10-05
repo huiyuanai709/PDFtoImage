@@ -19,6 +19,12 @@ var options = new RenderOptions(Dpi: dpi, AntiAliasing: PdfAntiAliasing.None, Gr
 Console.WriteLine($"OCR-style options: DPI={dpi}, AntiAliasing=None, Grayscale=true, runs={runs}");
 Console.WriteLine();
 
+if (args.Contains("--profile"))
+{
+    await ProfileLease(scanPages, options, runs);
+    return;
+}
+
 var textPdf = BuildTextPdf(textPages);
 var (scanPdf, scanInfo) = BuildScanPdf(scanPages);
 Console.WriteLine($"Text PDF: {textPages} pages, {textPdf.Length / 1024.0:F0} KiB");
@@ -56,6 +62,235 @@ if (!skipParallel)
     await ReportSteadyParallel("scan Parallel IPC workers=4 steady", scanPdf, options, 4, ProcessorTransferMode.Ipc);
     await ReportSteadyParallel("scan Parallel MMF workers=1 steady", scanPdf, options, 1, ProcessorTransferMode.MemoryMappedFile);
     await ReportSteadyParallel("scan Parallel MMF workers=4 steady", scanPdf, options, 4, ProcessorTransferMode.MemoryMappedFile);
+}
+
+async Task ProfileLease(int pageCount, RenderOptions options, int runs)
+{
+    var (pdf, info) = BuildScanPdf(pageCount);
+    var path = Path.Combine(Path.GetTempPath(), "PDFtoImage.Profile." + Guid.NewGuid().ToString("N") + ".pdf");
+    File.WriteAllBytes(path, pdf);
+    Console.WriteLine($"Profile scan PDF: {pageCount} pages, {pdf.Length / (1024.0 * 1024.0):F1} MiB ({info})");
+    Console.WriteLine();
+    CompareNative(Path.Combine("src", "Tests", "Assets", "SocialPreview.pdf"), options);
+    CompareNative(Path.Combine("src", "Tests", "Assets", "Wikimedia_Commons_web.pdf"), options);
+    CompareNative(Path.Combine("src", "Tests", "Assets", "Wikimedia_Commons_web.pdf"), options with { Rotation = PdfRotation.Rotate90 });
+    CompareNative(path, options);
+
+    void Time(string name, Action action)
+    {
+        action();
+        var samples = new double[runs];
+        for (var i = 0; i < samples.Length; i++)
+        {
+            var watch = Stopwatch.StartNew();
+            action();
+            watch.Stop();
+            samples[i] = watch.Elapsed.TotalMilliseconds;
+        }
+
+        Array.Sort(samples);
+        Console.WriteLine($"{name,-56} median {samples[samples.Length / 2],8:F2} ms   samples [{string.Join(", ", samples.Select(sample => sample.ToString("F1")))}]");
+    }
+
+    Time("session open (file)", () =>
+    {
+        using var stream = File.OpenRead(path);
+        using var session = PdfSession.Open(stream, leaveOpen: true);
+        _ = session.PageCount;
+    });
+
+    Time("session open + first Gray8 page", () =>
+    {
+        using var stream = File.OpenRead(path);
+        using var session = PdfSession.Open(stream, leaveOpen: true);
+        using var pixels = session.RenderPixels(0, options);
+        if (pixels.ByteCount <= 0)
+            throw new InvalidOperationException();
+    });
+
+    using (var stream = File.OpenRead(path))
+    using (var session = PdfSession.Open(stream, leaveOpen: true))
+    {
+        using var warmup = session.RenderPixels(0, options);
+        Console.WriteLine($"Gray8 page: {warmup.Width}x{warmup.Height}, {warmup.ByteCount / 1024.0:F0} KiB");
+        Time("Gray8 pages 1-4, document open", () =>
+        {
+            for (var page = 1; page <= 4 && page < session.PageCount; page++)
+                using (session.RenderPixels(page, options)) { }
+        });
+        Time("BGRA pages 1-4, document open", () =>
+        {
+            for (var page = 1; page <= 4 && page < session.PageCount; page++)
+                using (session.Render(page, options)) { }
+        });
+        var nativeOptions = options with { NativeGrayscale = true };
+        using (var exact = session.RenderPixels(1, options))
+        using (var native = session.RenderPixels(1, nativeOptions))
+        {
+            long sum = 0;
+            var max = 0;
+            var count = 0;
+            var left = exact.Pixels.Span;
+            var right = native.Pixels.Span;
+            for (var y = 0; y < exact.Height; y++)
+            {
+                for (var x = 0; x < exact.Width; x++)
+                {
+                    var delta = Math.Abs(left[y * exact.RowBytes + x] - right[y * native.RowBytes + x]);
+                    sum += delta;
+                    if (delta > max)
+                        max = delta;
+                    count++;
+                }
+            }
+
+            Console.WriteLine($"Native gray vs exact gray: mean abs {sum / (double)count:F2}, max {max}, {exact.Width}x{exact.Height}");
+        }
+        Time("native gray pages 1-4, document open", () =>
+        {
+            for (var page = 1; page <= 4 && page < session.PageCount; page++)
+                using (session.RenderPixels(page, nativeOptions)) { }
+        });
+    }
+
+    var jpeg = GrayJpeg(1700, 2200);
+    Time("Skia decode + resize JPEG to 1105x1430", () =>
+    {
+        using var decoded = SKBitmap.Decode(jpeg);
+        using var scaled = decoded.Resize(new SKImageInfo(1105, 1430, SKColorType.Gray8, SKAlphaType.Opaque), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
+        if (scaled == null || scaled.ByteCount <= 0)
+            throw new InvalidOperationException();
+    });
+
+    var largePages = Math.Max(pageCount, 160);
+    var (largePdf, largeInfo) = BuildScanPdf(largePages);
+    var largePath = Path.Combine(Path.GetTempPath(), "PDFtoImage.Profile." + Guid.NewGuid().ToString("N") + ".pdf");
+    File.WriteAllBytes(largePath, largePdf);
+    Console.WriteLine($"Large scan PDF: {largePages} pages, {largePdf.Length / (1024.0 * 1024.0):F1} MiB ({largeInfo})");
+    Time("large session open (file)", () =>
+    {
+        using var stream = File.OpenRead(largePath);
+        using var session = PdfSession.Open(stream, leaveOpen: true);
+        _ = session.PageCount;
+    });
+    File.Delete(largePath);
+
+    Console.WriteLine();
+    var lease = Math.Min(4, pageCount);
+    await TimeLease("MMF one call, 8 pages, 4 workers", path, lease * 2, options, cold: false, warmupPages: lease * 2);
+    await TimeLease("MMF cold processor, 4-page lease", path, lease, options, cold: true);
+    await TimeLease("MMF warm process, next 4-page lease", path, lease, options, cold: false);
+    await TimeLease("IPC cold processor, 4-page lease", path, lease, options, cold: true, ipc: true);
+    await TimeLease("IPC warm process, next 4-page lease", path, lease, options, cold: false, ipc: true);
+    await TimeLease("IPC share+retain cold, 4-page lease", path, lease, options, cold: true, ipc: true, share: true, retain: true);
+    await TimeLease("IPC share+retain warm, 4-page lease", path, lease, options, cold: false, ipc: true, share: true, retain: true);
+    await TimeLease("MMF retain warm, 4-page lease", path, lease, options, cold: false, retain: true);
+    File.Delete(path);
+}
+
+static void CompareNative(string path, RenderOptions options)
+{
+    if (!File.Exists(path))
+        return;
+
+    var native = options with { NativeGrayscale = true };
+    using var stream = File.OpenRead(path);
+    using var session = PdfSession.Open(stream, leaveOpen: true);
+    using var exact = session.RenderPixels(0, options);
+    using var other = session.RenderPixels(0, native);
+    long sum = 0;
+    var max = 0;
+    var changed = 0;
+    var count = 0;
+    var left = exact.Pixels.Span;
+    var right = other.Pixels.Span;
+    var height = Math.Min(exact.Height, other.Height);
+    var width = Math.Min(exact.Width, other.Width);
+    for (var y = 0; y < height; y++)
+    {
+        for (var x = 0; x < width; x++)
+        {
+            var delta = Math.Abs(left[y * exact.RowBytes + x] - right[y * other.RowBytes + x]);
+            sum += delta;
+            if (delta > max)
+                max = delta;
+            if (delta != 0)
+                changed++;
+            count++;
+        }
+    }
+
+    Console.WriteLine($"native vs exact {Path.GetFileName(path)} rot={options.Rotation}: mean {sum / (double)Math.Max(count, 1):F3} max {max} changed {changed * 100.0 / Math.Max(count, 1):F2}% {exact.Width}x{exact.Height}");
+}
+
+static byte[] GrayJpeg(int width, int height)
+{
+    using var bitmap = new SKBitmap(width, height, SKColorType.Gray8, SKAlphaType.Opaque);
+    var pixels = bitmap.GetPixelSpan();
+    uint state = 0xC0FFEE;
+    for (var i = 0; i < pixels.Length; i++)
+    {
+        state = state * 1664525 + 1013904223;
+        pixels[i] = (byte)(40 + (state >> 24) % 180);
+    }
+
+    using var image = SKImage.FromBitmap(bitmap);
+    using var data = image.Encode(SKEncodedImageFormat.Jpeg, 60);
+    return data.ToArray();
+}
+
+async Task TimeLease(string name, string path, int pages, RenderOptions options, bool cold, bool ipc = false, int warmupPages = 0, bool share = false, bool retain = false)
+{
+    var mode = ipc ? ProcessorTransferMode.Ipc : ProcessorTransferMode.MemoryMappedFile;
+    var temp = Path.Combine(Path.GetTempPath(), "PDFtoImage.Profile." + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(temp);
+    try
+    {
+        await using var processor = new ParallelPdfProcessor(new ProcessorOptions
+        {
+            WorkerCount = 4,
+            TransferMode = mode,
+            TempDirectory = temp,
+            ShareSourceFile = share,
+            RetainDocuments = retain
+        });
+
+        async Task RenderLease(int start, int count)
+        {
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var range = Enumerable.Range(start, count).ToArray();
+            await foreach (var bitmap in processor.ToImagesAsync(stream, range, leaveOpen: true, options: options))
+                bitmap.Dispose();
+        }
+
+        if (warmupPages > 0)
+            await RenderLease(0, warmupPages);
+        else if (!cold)
+            await RenderLease(0, pages);
+
+        var start = cold || warmupPages > 0 ? 0 : pages;
+        var samples = new double[cold ? 1 : runs];
+        for (var i = 0; i < samples.Length; i++)
+        {
+            var watch = Stopwatch.StartNew();
+            await RenderLease(start, pages);
+            watch.Stop();
+            samples[i] = watch.Elapsed.TotalMilliseconds;
+        }
+
+        if (cold)
+        {
+            Console.WriteLine($"{name,-56} {samples[0],8:F2} ms");
+            return;
+        }
+
+        Array.Sort(samples);
+        Console.WriteLine($"{name,-56} median {samples[samples.Length / 2],8:F2} ms   samples [{string.Join(", ", samples.Select(sample => sample.ToString("F1")))}]");
+    }
+    finally
+    {
+        Directory.Delete(temp, recursive: true);
+    }
 }
 
 void ReportAnalyze(string name, byte[] pdf)

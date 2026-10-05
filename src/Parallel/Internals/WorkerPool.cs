@@ -30,6 +30,8 @@ namespace PDFtoImage.Parallel.Internals
 
         private readonly string _tempDirectory;
 
+        private readonly bool _retainDocuments;
+
         private readonly SemaphoreSlim _documentCleanup = new(1, 1);
 
         private readonly CancellationTokenSource _shutdown = new();
@@ -44,7 +46,7 @@ namespace PDFtoImage.Parallel.Internals
 
         private int _activeOperations;
 
-        internal WorkerPool(int workerCount, int? maxParallelism = null, ProcessorTransferMode transferMode = ProcessorTransferMode.Ipc, string? tempDirectory = null)
+        internal WorkerPool(int workerCount, int? maxParallelism = null, ProcessorTransferMode transferMode = ProcessorTransferMode.Ipc, string? tempDirectory = null, bool retainDocuments = false)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workerCount);
             if (maxParallelism is int maximum)
@@ -55,6 +57,7 @@ namespace PDFtoImage.Parallel.Internals
             _parallelismSlots = maxParallelism is int limit ? new SemaphoreSlim(limit) : null;
             _transferMode = transferMode;
             _tempDirectory = tempDirectory ?? Path.GetTempPath();
+            _retainDocuments = retainDocuments;
         }
 
         protected virtual Task<WorkerConnection> StartWorkerAsync(CancellationToken cancellationToken) =>
@@ -101,6 +104,9 @@ namespace PDFtoImage.Parallel.Internals
 
         public async Task ReleaseDocumentAsync(PdfRequest request)
         {
+            if (_retainDocuments)
+                return;
+
             lock (_gate)
             {
                 if (_disposed)

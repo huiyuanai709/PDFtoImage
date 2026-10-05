@@ -38,6 +38,22 @@ namespace PDFtoImage.Parallel
         public bool ReuseFileStream { get; init; } = true;
 
         /// <summary>
+        /// In <see cref="ProcessorTransferMode.Ipc"/> mode, open a readable <see cref="System.IO.FileStream"/>
+        /// by path in the worker instead of copying the PDF through the pipe. Bitmaps still return through the pipe.
+        /// The file must stay unchanged while a worker has it open. With <see cref="RetainDocuments"/> that lasts
+        /// until the processor is disposed or the file length or last-write time changes.
+        /// Non-file streams are still copied. The default is <see langword="false"/>, which keeps the IPC snapshot of the bytes.
+        /// </summary>
+        public bool ShareSourceFile { get; init; }
+
+        /// <summary>
+        /// Keep a worker's opened file PDF across calls when the path, length, last-write time, and password match.
+        /// The next lease then skips parsing the file again. Byte-array requests are not reused.
+        /// The default is <see langword="false"/>, which unloads the document when the call finishes.
+        /// </summary>
+        public bool RetainDocuments { get; init; }
+
+        /// <summary>
         /// Directory for temporary PDF and bitmap files in <see cref="ProcessorTransferMode.MemoryMappedFile"/> mode only.
         /// <see langword="null"/> uses <see cref="System.IO.Path.GetTempPath()"/>. A specified directory is resolved
         /// to an absolute path and created when the processor is constructed. Temporary files are deleted by the host

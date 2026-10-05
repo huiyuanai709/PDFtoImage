@@ -34,9 +34,13 @@ namespace PDFtoImage.Parallel.Internals
             _onDispose = onDispose;
             _deleteOnClose = deleteOnClose;
             _deleteFile = deleteFile;
+            var info = new FileInfo(filePath);
+            Identity = new DocumentIdentity(filePath, info.Length, info.LastWriteTimeUtc.Ticks, password);
         }
 
         internal Guid Id { get; } = Guid.NewGuid();
+
+        internal DocumentIdentity? Identity { get; }
 
         internal byte[]? Bytes { get; }
 
@@ -71,4 +75,6 @@ namespace PDFtoImage.Parallel.Internals
             }
         }
     }
+
+    internal readonly record struct DocumentIdentity(string Path, long Length, long LastWriteTimeUtcTicks, string? Password);
 }
