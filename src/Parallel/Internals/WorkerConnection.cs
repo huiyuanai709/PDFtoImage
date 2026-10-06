@@ -179,7 +179,17 @@ namespace PDFtoImage.Parallel.Internals
             }
         }
 
-        internal async Task<SKBitmap> RenderPageAsync(int page, RenderOptions options, ProcessorTransferMode transferMode, string tempDirectory, CancellationToken cancellationToken)
+        internal Task<SKBitmap> RenderPageAsync(int page, RenderOptions options, ProcessorTransferMode transferMode, string tempDirectory, CancellationToken cancellationToken) =>
+            RenderAsync(page, options, transferMode, tempDirectory, static (response, offset, file) => file == null
+                ? WorkerProtocol.ReadBitmap(response, offset)
+                : WorkerProtocol.ReadMappedBitmap(response, offset, file), cancellationToken);
+
+        internal Task<PdfPixels> RenderPixelsAsync(int page, RenderOptions options, ProcessorTransferMode transferMode, string tempDirectory, CancellationToken cancellationToken) =>
+            RenderAsync(page, options, transferMode, tempDirectory, static (response, offset, file) => file == null
+                ? WorkerProtocol.ReadPixels(response, offset)
+                : WorkerProtocol.ReadMappedPixels(response, offset, file), cancellationToken);
+
+        private async Task<T> RenderAsync<T>(int page, RenderOptions options, ProcessorTransferMode transferMode, string tempDirectory, Func<byte[], int, FileStream?, T> read, CancellationToken cancellationToken) where T : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -187,7 +197,7 @@ namespace PDFtoImage.Parallel.Internals
                 ? Path.Combine(tempDirectory, "PDFtoImage.Parallel." + Guid.NewGuid().ToString("N") + ".bitmap.raw")
                 : null;
             FileStream? bitmapLifetime = null;
-            SKBitmap? bitmap = null;
+            T? bitmap = default;
 
             try
             {
@@ -226,9 +236,7 @@ namespace PDFtoImage.Parallel.Internals
 
                 WorkerProtocol.ThrowIfError(reader);
 
-                bitmap = bitmapPath == null
-                    ? WorkerProtocol.ReadBitmap(response, checked((int)reader.BaseStream.Position))
-                    : WorkerProtocol.ReadMappedBitmap(response, checked((int)reader.BaseStream.Position), bitmapLifetime!);
+                bitmap = read(response, checked((int)reader.BaseStream.Position), bitmapLifetime);
                 return bitmap;
             }
             catch (ParallelConversionException)

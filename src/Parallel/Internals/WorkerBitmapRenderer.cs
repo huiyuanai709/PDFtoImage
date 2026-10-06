@@ -39,6 +39,7 @@ namespace PDFtoImage.Parallel.Internals
                     var byteCount = checked(rowBytes * height);
                     WorkerProtocol.ValidateIpcBitmapLength(byteCount);
                     pixels = Marshal.AllocHGlobal(byteCount);
+                    new Span<byte>((void*)pixels, byteCount).Clear();
                     return (pixels, rowBytes);
                 }, grayBitmap: nativeGray);
 
@@ -56,6 +57,7 @@ namespace PDFtoImage.Parallel.Internals
                     var grayBytes = checked(grayStride * height);
                     WorkerProtocol.ValidateIpcBitmapLength(grayBytes);
                     packed = Marshal.AllocHGlobal(grayBytes);
+                    new Span<byte>((void*)packed, grayBytes).Clear();
                     gray = GrayPixels.TryPack((byte*)pixels, rowBytes, (byte*)packed, grayStride, width, height);
 
                     if (gray)
@@ -103,12 +105,14 @@ namespace PDFtoImage.Parallel.Internals
                     height = renderHeight;
                     rowBytes = checked(width * 4);
                     pixels = Marshal.AllocHGlobal(checked(rowBytes * height));
+                    new Span<byte>((void*)pixels, rowBytes * height).Clear();
                     return (pixels, rowBytes);
                 });
 
                 var grayStride = GrayPixels.Stride(width);
                 var grayBytes = checked(grayStride * height);
                 packed = Marshal.AllocHGlobal(grayBytes);
+                new Span<byte>((void*)packed, grayBytes).Clear();
 
                 if (GrayPixels.TryPack((byte*)pixels, rowBytes, (byte*)packed, grayStride, width, height))
                 {

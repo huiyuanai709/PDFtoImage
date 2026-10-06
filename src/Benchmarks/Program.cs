@@ -25,6 +25,12 @@ if (args.Contains("--profile"))
     return;
 }
 
+if (args.Contains("--hotpath"))
+{
+    await ProfileHotPath(scanPages, options, runs);
+    return;
+}
+
 var textPdf = BuildTextPdf(textPages);
 var (scanPdf, scanInfo) = BuildScanPdf(scanPages);
 Console.WriteLine($"Text PDF: {textPages} pages, {textPdf.Length / 1024.0:F0} KiB");
@@ -188,6 +194,78 @@ async Task ProfileLease(int pageCount, RenderOptions options, int runs)
     File.Delete(path);
 }
 
+async Task ProfileHotPath(int pageCount, RenderOptions options, int runs)
+{
+    var native = options with { NativeGrayscale = true };
+    var (pdf, info) = BuildScanPdf(pageCount);
+    var path = Path.Combine(Path.GetTempPath(), "PDFtoImage.HotPath." + Guid.NewGuid().ToString("N") + ".pdf");
+    await File.WriteAllBytesAsync(path, pdf);
+    Console.WriteLine($"Hot-path scan: {pageCount} pages, {pdf.Length / (1024.0 * 1024.0):F1} MiB ({info})");
+    using (var stream = File.OpenRead(path))
+    using (var session = PdfSession.Open(stream, leaveOpen: true))
+    {
+        using var first = session.RenderPixels(0, native);
+        Console.WriteLine($"Gray8 {first.Width}x{first.Height} {first.ByteCount / 1024.0:F0} KiB");
+        Time("expand Gray8 to BGRA", () => Expand(first));
+        Time("copy Gray8 buffer", () => CopyGray(first));
+    }
+
+    var lease = Math.Min(4, pageCount);
+    await TimeLease("MMF ToImages 2 workers warm 4-page", path, lease, native, cold: false, workers: 2, retain: true);
+    await TimeLease("MMF ToPixels 2 workers warm 4-page", path, lease, native, cold: false, workers: 2, retain: true, pixels: true);
+    await TimeLease("MMF ToImages 4 workers warm 4-page", path, lease, native, cold: false, workers: 4, retain: true);
+    await TimeLease("MMF ToPixels 4 workers warm 4-page", path, lease, native, cold: false, workers: 4, retain: true, pixels: true);
+    await TimeCold("cold first 4-page lease", path, lease, native);
+    await TimeCold("prewarmed first 4-page lease", path, lease, native, prewarm: true);
+    File.Delete(path);
+
+    void Time(string name, Action action)
+    {
+        action();
+        var samples = new double[runs];
+        for (var i = 0; i < samples.Length; i++)
+        {
+            var watch = Stopwatch.StartNew();
+            action();
+            watch.Stop();
+            samples[i] = watch.Elapsed.TotalMilliseconds;
+        }
+
+        Array.Sort(samples);
+        Console.WriteLine($"{name,-56} median {samples[samples.Length / 2],8:F2} ms");
+    }
+
+    static void Expand(PdfPixels pixels)
+    {
+        var bgra = new byte[checked(pixels.Width * 4 * pixels.Height)];
+        var source = pixels.Pixels.Span;
+        for (var y = 0; y < pixels.Height; y++)
+        {
+            var row = y * pixels.RowBytes;
+            var dst = y * pixels.Width * 4;
+            for (var x = 0; x < pixels.Width; x++)
+            {
+                var gray = source[row + x];
+                bgra[dst + x * 4] = gray;
+                bgra[dst + x * 4 + 1] = gray;
+                bgra[dst + x * 4 + 2] = gray;
+                bgra[dst + x * 4 + 3] = 255;
+            }
+        }
+
+        if (bgra[0] == 1 && bgra[^1] == 2)
+            throw new InvalidOperationException();
+    }
+
+    static void CopyGray(PdfPixels pixels)
+    {
+        var copy = new byte[pixels.ByteCount];
+        pixels.Pixels.Span.CopyTo(copy);
+        if (copy[0] == 1 && copy[^1] == 2)
+            throw new InvalidOperationException();
+    }
+}
+
 static void CompareNative(string path, RenderOptions options)
 {
     if (!File.Exists(path))
@@ -239,7 +317,38 @@ static byte[] GrayJpeg(int width, int height)
     return data.ToArray();
 }
 
-async Task TimeLease(string name, string path, int pages, RenderOptions options, bool cold, bool ipc = false, int warmupPages = 0, bool share = false, bool retain = false)
+async Task TimeCold(string name, string path, int pages, RenderOptions options, bool prewarm = false)
+{
+    var temp = Path.Combine(Path.GetTempPath(), "PDFtoImage.Profile." + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(temp);
+    try
+    {
+        var startup = Stopwatch.StartNew();
+        await using var processor = new ParallelPdfProcessor(new ProcessorOptions
+        {
+            WorkerCount = 2,
+            TransferMode = ProcessorTransferMode.MemoryMappedFile,
+            TempDirectory = temp,
+            RetainDocuments = true,
+            PrewarmWorkers = prewarm
+        });
+        if (prewarm)
+            await processor.PrewarmAsync();
+        startup.Stop();
+        var watch = Stopwatch.StartNew();
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        await foreach (var pixels in processor.ToImagesPixelsAsync(stream, Enumerable.Range(0, pages).ToArray(), leaveOpen: true, options: options))
+            pixels.Dispose();
+        watch.Stop();
+        Console.WriteLine($"{name,-56} {watch.Elapsed.TotalMilliseconds,8:F2} ms   startup {startup.Elapsed.TotalMilliseconds:F0} ms");
+    }
+    finally
+    {
+        Directory.Delete(temp, recursive: true);
+    }
+}
+
+async Task TimeLease(string name, string path, int pages, RenderOptions options, bool cold, bool ipc = false, int warmupPages = 0, bool share = false, bool retain = false, int workers = 4, bool pixels = false)
 {
     var mode = ipc ? ProcessorTransferMode.Ipc : ProcessorTransferMode.MemoryMappedFile;
     var temp = Path.Combine(Path.GetTempPath(), "PDFtoImage.Profile." + Guid.NewGuid().ToString("N"));
@@ -248,7 +357,7 @@ async Task TimeLease(string name, string path, int pages, RenderOptions options,
     {
         await using var processor = new ParallelPdfProcessor(new ProcessorOptions
         {
-            WorkerCount = 4,
+            WorkerCount = workers,
             TransferMode = mode,
             TempDirectory = temp,
             ShareSourceFile = share,
@@ -259,8 +368,16 @@ async Task TimeLease(string name, string path, int pages, RenderOptions options,
         {
             await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
             var range = Enumerable.Range(start, count).ToArray();
-            await foreach (var bitmap in processor.ToImagesAsync(stream, range, leaveOpen: true, options: options))
-                bitmap.Dispose();
+            if (pixels)
+            {
+                await foreach (var image in processor.ToImagesPixelsAsync(stream, range, leaveOpen: true, options: options))
+                    image.Dispose();
+            }
+            else
+            {
+                await foreach (var bitmap in processor.ToImagesAsync(stream, range, leaveOpen: true, options: options))
+                    bitmap.Dispose();
+            }
         }
 
         if (warmupPages > 0)

@@ -66,6 +66,39 @@ namespace PDFtoImage.Tests
         }
 
         [TestMethod]
+        public async Task RetainedDocumentReloadsAfterTheWorkerIsReplaced()
+        {
+            var path = Path.Combine(Path.GetTempPath(), "PDFtoImage.Parallel." + Guid.NewGuid().ToString("N") + ".pdf");
+            try
+            {
+                File.WriteAllBytes(path, Pdf);
+                await using var processor = new ParallelPdfProcessor(new ProcessorOptions
+                {
+                    WorkerCount = 1,
+                    ShareSourceFile = true,
+                    RetainDocuments = true
+                });
+                var options = new RenderOptions(Dpi: 40);
+                using var image = await processor.ToImageAsync(File.OpenRead(path), leaveOpen: false, options: options, cancellationToken: TestContext!.CancellationToken);
+                Assert.AreSequenceEqual([1], processor.WorkerDocumentLoadCounts);
+                using var process = Process.GetProcessById(processor.WorkerProcessIds.Single());
+                process.Kill();
+                await process.WaitForExitAsync(TestContext.CancellationToken);
+                var error = await Assert.ThrowsExactlyAsync<ParallelConversionException>(() =>
+                    processor.ToImageAsync(File.OpenRead(path), options: options, cancellationToken: TestContext.CancellationToken));
+                Assert.AreEqual("WorkerProcessTerminated", error.RemoteExceptionType);
+                using var replacement = await processor.ToImageAsync(File.OpenRead(path), options: options, cancellationToken: TestContext.CancellationToken);
+                AssertBitmapsEqual(image, replacement);
+                Assert.AreSequenceEqual([1], processor.WorkerDocumentLoadCounts);
+                Assert.AreNotEqual(process.Id, processor.WorkerProcessIds.Single());
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [TestMethod]
         public async Task CancellationAndDisposalInterruptActiveRendering()
         {
             await using var pool = new WorkerPool(2);

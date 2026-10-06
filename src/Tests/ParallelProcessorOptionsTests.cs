@@ -539,6 +539,127 @@ namespace PDFtoImage.Tests
         }
 
         [TestMethod]
+        [DataRow(ProcessorTransferMode.Ipc)]
+        [DataRow(ProcessorTransferMode.MemoryMappedFile)]
+        public async Task ToPixelsReturnsGrayWithoutExpanding(ProcessorTransferMode mode)
+        {
+            using var fixture = new FileFixture();
+            await using var processor = new ParallelPdfProcessor(new ProcessorOptions
+            {
+                WorkerCount = 1,
+                TransferMode = mode,
+                TempDirectory = fixture.TempDirectory,
+                ShareSourceFile = mode == ProcessorTransferMode.Ipc,
+                RetainDocuments = true
+            });
+            var options = new RenderOptions(Dpi: 40, AntiAliasing: PdfAntiAliasing.None, Grayscale: true)
+            {
+                NativeGrayscale = true
+            };
+            using var session = PdfSession.Open(new MemoryStream(Pdf), leaveOpen: true);
+            using var expected = session.RenderPixels(0, options);
+            using var actual = await processor.ToPixelsAsync(File.OpenRead(fixture.InputPath), leaveOpen: false, options: options, cancellationToken: TestContext!.CancellationToken);
+
+            Assert.AreEqual(SKColorType.Gray8, actual.ColorType);
+            Assert.AreEqual(expected.Width, actual.Width);
+            Assert.AreEqual(expected.Height, actual.Height);
+            Assert.AreEqual(expected.RowBytes, actual.RowBytes);
+            Assert.IsTrue(expected.Pixels.Span.SequenceEqual(actual.Pixels.Span));
+            Assert.IsLessThan(expected.Width * expected.Height * 4, actual.ByteCount);
+
+            await foreach (var page in processor.ToImagesPixelsAsync(File.OpenRead(fixture.InputPath), new[] { 0 }, leaveOpen: false, options: options, cancellationToken: TestContext.CancellationToken))
+            {
+                using (page)
+                    Assert.IsTrue(expected.Pixels.Span.SequenceEqual(page.Pixels.Span));
+            }
+
+            Assert.AreSequenceEqual([1], processor.WorkerDocumentLoadCounts);
+        }
+
+        [TestMethod]
+        public async Task PrewarmStartsWorkersBeforeTheFirstRender()
+        {
+            await using var processor = new ParallelPdfProcessor(new ProcessorOptions { WorkerCount = 2, PrewarmWorkers = true });
+            await processor.PrewarmAsync(TestContext!.CancellationToken);
+            var ids = processor.WorkerProcessIds;
+            Assert.HasCount(2, ids);
+            using var image = await processor.ToImageAsync(OpenPdf(), options: new RenderOptions(Dpi: 40), cancellationToken: TestContext.CancellationToken);
+            Assert.AreSequenceEqual(ids, processor.WorkerProcessIds);
+            Assert.IsGreaterThan(0, image.Width);
+        }
+
+        [TestMethod]
+        public async Task RetainSkipsTemporaryCopiesAndReloadsReplacedBytes()
+        {
+            using var fixture = new FileFixture();
+            await using var processor = new ParallelPdfProcessor(new ProcessorOptions
+            {
+                WorkerCount = 1,
+                TransferMode = ProcessorTransferMode.MemoryMappedFile,
+                TempDirectory = fixture.TempDirectory,
+                RetainDocuments = true
+            });
+            var options = new RenderOptions(Dpi: 40);
+            using (var first = await processor.ToImageAsync(new MemoryStream(Pdf), leaveOpen: true, options: options, cancellationToken: TestContext!.CancellationToken))
+            using (var expected = Conversion.ToImage(Pdf, options: options))
+                AssertBitmapsEqual(expected, first);
+
+            Assert.IsTrue(processor.WorkerDocumentIds.All(id => id == null));
+            Assert.IsEmpty(Directory.GetFiles(fixture.TempDirectory));
+
+            using (var second = await processor.ToImageAsync(new MemoryStream(Pdf), leaveOpen: true, options: options, cancellationToken: TestContext.CancellationToken))
+            using (var expected = Conversion.ToImage(Pdf, options: options))
+                AssertBitmapsEqual(expected, second);
+
+            Assert.AreSequenceEqual([2], processor.WorkerDocumentLoadCounts);
+
+            var copy = Path.Combine(fixture.TempDirectory, "copy.pdf");
+            File.WriteAllBytes(copy, Pdf);
+            await using var files = new ParallelPdfProcessor(new ProcessorOptions
+            {
+                WorkerCount = 1,
+                TransferMode = ProcessorTransferMode.MemoryMappedFile,
+                TempDirectory = fixture.TempDirectory,
+                RetainDocuments = true
+            });
+            using (var image = await files.ToImageAsync(File.OpenRead(copy), leaveOpen: false, options: options, cancellationToken: TestContext.CancellationToken))
+                Assert.IsGreaterThan(0, image.Width);
+            Assert.AreSequenceEqual([1], files.WorkerDocumentLoadCounts);
+
+            var created = File.GetCreationTimeUtc(copy);
+            var written = File.GetLastWriteTimeUtc(copy);
+            var bytes = File.ReadAllBytes(copy);
+            bytes[Math.Min(4096, bytes.Length - 1)] ^= 0x22;
+            File.WriteAllBytes(copy, bytes);
+            try
+            {
+                File.SetCreationTimeUtc(copy, created);
+            }
+            catch (PlatformNotSupportedException) { }
+            File.SetLastWriteTimeUtc(copy, written);
+
+            using (var original = new PdfRequest(Path.Combine(fixture.TempDirectory, "stamp-a.pdf"), File.OpenRead(WritePdf(fixture.TempDirectory, "stamp-a.pdf", Pdf)), null, null, deleteFile: false))
+            using (var replaced = new PdfRequest(copy, File.OpenRead(copy), null, null, deleteFile: false))
+            {
+                Assert.AreEqual(original.Identity!.Value.Length, replaced.Identity!.Value.Length);
+                Assert.AreNotEqual(original.Identity.Value.ContentStamp, replaced.Identity.Value.ContentStamp);
+            }
+
+            using (var image = await files.ToImageAsync(File.OpenRead(copy), leaveOpen: false, options: options, cancellationToken: TestContext.CancellationToken))
+                Assert.IsGreaterThan(0, image.Width);
+            Assert.AreSequenceEqual([2], files.WorkerDocumentLoadCounts);
+            File.Delete(copy);
+            File.Delete(Path.Combine(fixture.TempDirectory, "stamp-a.pdf"));
+        }
+
+        private static string WritePdf(string directory, string name, byte[] bytes)
+        {
+            var path = Path.Combine(directory, name);
+            File.WriteAllBytes(path, bytes);
+            return path;
+        }
+
+        [TestMethod]
         public void RawMappedBitmapRoundTripPreservesPixels()
         {
             var path = Path.Combine(Path.GetTempPath(), "PDFtoImage.Parallel." + Guid.NewGuid().ToString("N") + ".bitmap.raw");

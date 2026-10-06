@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace PDFtoImage
 {
@@ -165,8 +166,8 @@ namespace PDFtoImage
 
         private PdfPixels RenderBuffer(int page, RenderOptions options, bool gray)
         {
-            byte[]? pixels = null;
-            byte[]? rented = null;
+            byte[]? scratch = null;
+            byte[]? owned = null;
             var width = 0;
             var height = 0;
             var rowBytes = 0;
@@ -181,31 +182,32 @@ namespace PDFtoImage
                     height = renderHeight;
                     rowBytes = nativeGray ? GrayPixels.Stride(renderWidth) : checked(renderWidth * 4);
                     var byteCount = checked(rowBytes * renderHeight);
+                    var buffer = ArrayPool<byte>.Shared.Rent(byteCount);
+                    Array.Clear(buffer, 0, byteCount);
 
                     if (gray && !nativeGray)
-                    {
-                        rented = ArrayPool<byte>.Shared.Rent(byteCount);
-                        pixels = rented;
-                    }
+                        scratch = buffer;
                     else
-                    {
-                        pixels = new byte[byteCount];
-                    }
+                        owned = buffer;
 
-                    pin = GCHandle.Alloc(pixels, GCHandleType.Pinned);
+                    pin = GCHandle.Alloc(buffer, GCHandleType.Pinned);
                     return (pin.AddrOfPinnedObject(), rowBytes);
                 }, grayBitmap: nativeGray);
 
-                if (nativeGray)
-                    return new PdfPixels(pixels!, width, height, rowBytes, SKColorType.Gray8, SKAlphaType.Opaque);
-
-                if (!gray)
+                if (nativeGray || !gray)
                 {
-                    return new PdfPixels(pixels!, width, height, rowBytes, SKColorType.Bgra8888, SKAlphaType.Premul);
+                    var result = new PdfPixels(owned!, width, height, rowBytes,
+                        nativeGray ? SKColorType.Gray8 : SKColorType.Bgra8888,
+                        nativeGray ? SKAlphaType.Opaque : SKAlphaType.Premul,
+                        pooled: true);
+                    owned = null;
+                    return result;
                 }
 
                 var grayStride = GrayPixels.Stride(width);
-                var packed = new byte[checked(grayStride * height)];
+                var packed = ArrayPool<byte>.Shared.Rent(checked(grayStride * height));
+                Array.Clear(packed, 0, grayStride * height);
+                owned = packed;
 
                 unsafe
                 {
@@ -216,15 +218,20 @@ namespace PDFtoImage
                     }
                 }
 
-                return new PdfPixels(packed, width, height, grayStride, SKColorType.Gray8, SKAlphaType.Opaque);
+                var grayResult = new PdfPixels(packed, width, height, grayStride, SKColorType.Gray8, SKAlphaType.Opaque, pooled: true);
+                owned = null;
+                return grayResult;
             }
             finally
             {
                 if (pin.IsAllocated)
                     pin.Free();
 
-                if (rented != null)
-                    ArrayPool<byte>.Shared.Return(rented);
+                if (scratch != null)
+                    ArrayPool<byte>.Shared.Return(scratch);
+
+                if (owned != null)
+                    ArrayPool<byte>.Shared.Return(owned);
             }
         }
 
@@ -248,17 +255,19 @@ namespace PDFtoImage
     }
 
     /// <summary>
-    /// Packed pixels for one rendered page. Dispose releases the managed buffer for collection;
-    /// the buffer itself is a managed array.
+    /// Packed pixels for one rendered page. The buffer comes from <see cref="ArrayPool{T}.Shared"/> when
+    /// <see cref="Dispose"/> returns it. <see cref="Pixels"/> is invalid after <see cref="Dispose"/>.
     /// </summary>
     public sealed class PdfPixels : IDisposable
     {
         private readonly byte[] _pixels;
-        private bool _disposed;
+        private readonly bool _pooled;
+        private int _disposed;
 
-        internal PdfPixels(byte[] pixels, int width, int height, int rowBytes, SKColorType colorType, SKAlphaType alphaType)
+        internal PdfPixels(byte[] pixels, int width, int height, int rowBytes, SKColorType colorType, SKAlphaType alphaType, bool pooled = false)
         {
             _pixels = pixels;
+            _pooled = pooled;
             Width = width;
             Height = height;
             RowBytes = rowBytes;
@@ -289,17 +298,21 @@ namespace PDFtoImage
         {
             get
             {
-#if NET6_0_OR_GREATER
-                ObjectDisposedException.ThrowIf(_disposed, this);
-#else
-                if (_disposed)
+                if (Volatile.Read(ref _disposed) != 0)
                     throw new ObjectDisposedException(nameof(PdfPixels));
-#endif
+
                 return new ReadOnlyMemory<byte>(_pixels, 0, ByteCount);
             }
         }
 
-        /// <summary>Marks the buffer as unused. The underlying array becomes eligible for collection.</summary>
-        public void Dispose() => _disposed = true;
+        /// <summary>Returns a pooled buffer to the pool. Further use of <see cref="Pixels"/> throws.</summary>
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+                return;
+
+            if (_pooled)
+                ArrayPool<byte>.Shared.Return(_pixels);
+        }
     }
 }
