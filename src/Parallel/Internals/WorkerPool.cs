@@ -32,6 +32,10 @@ namespace PDFtoImage.Parallel.Internals
 
         private readonly bool _retainDocuments;
 
+        private bool _prewarm;
+
+        private Task? _prewarmTask;
+
         private readonly SemaphoreSlim _documentCleanup = new(1, 1);
 
         private readonly CancellationTokenSource _shutdown = new();
@@ -46,7 +50,7 @@ namespace PDFtoImage.Parallel.Internals
 
         private int _activeOperations;
 
-        internal WorkerPool(int workerCount, int? maxParallelism = null, ProcessorTransferMode transferMode = ProcessorTransferMode.Ipc, string? tempDirectory = null, bool retainDocuments = false)
+        internal WorkerPool(int workerCount, int? maxParallelism = null, ProcessorTransferMode transferMode = ProcessorTransferMode.Ipc, string? tempDirectory = null, bool retainDocuments = false, bool prewarm = false)
         {
             ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workerCount);
             if (maxParallelism is int maximum)
@@ -58,6 +62,80 @@ namespace PDFtoImage.Parallel.Internals
             _transferMode = transferMode;
             _tempDirectory = tempDirectory ?? Path.GetTempPath();
             _retainDocuments = retainDocuments;
+            _prewarm = prewarm;
+            if (prewarm)
+                _prewarmTask = Track(PrewarmCoreAsync());
+        }
+
+        internal Task PrewarmAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, typeof(ParallelPdfProcessor));
+                _prewarm = true;
+                return _prewarmTask = _prewarmTask is { IsFaulted: false, IsCanceled: false } ? _prewarmTask : Track(PrewarmCoreAsync());
+            }
+        }
+
+        private Task EnsurePrewarmedAsync()
+        {
+            lock (_gate)
+            {
+                if (_prewarmTask is { IsFaulted: false, IsCanceled: false })
+                    return _prewarmTask;
+
+                _prewarmTask = Track(PrewarmCoreAsync());
+                return _prewarmTask;
+            }
+        }
+
+        private static Task Track(Task task)
+        {
+            // A startup failure is reported to the next render. Observe it here too so an
+            // unused processor does not raise an unobserved-task event.
+            _ = task.ContinueWith(static completed => _ = completed.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+            return task;
+        }
+
+        private async Task PrewarmCoreAsync()
+        {
+            var started = new List<WorkerConnection>(WorkerCount);
+
+            try
+            {
+                for (var i = 0; i < WorkerCount; i++)
+                {
+                    _shutdown.Token.ThrowIfCancellationRequested();
+                    started.Add(await StartWorkerAsync(_shutdown.Token).ConfigureAwait(false));
+                }
+
+                lock (_gate)
+                {
+                    if (_disposed || _shutdown.IsCancellationRequested)
+                    {
+                        foreach (var worker in started)
+                            worker.Dispose();
+                        return;
+                    }
+
+                    foreach (var worker in started)
+                    {
+                        var slot = new Slot { Worker = worker };
+                        _workers.Add(slot);
+                        _available.Push(slot);
+                    }
+                }
+            }
+            catch
+            {
+                foreach (var worker in started)
+                    worker.Dispose();
+                throw;
+            }
         }
 
         protected virtual Task<WorkerConnection> StartWorkerAsync(CancellationToken cancellationToken) =>
@@ -102,9 +180,22 @@ namespace PDFtoImage.Parallel.Internals
                 return worker.RenderPageAsync(offset, options, _transferMode, _tempDirectory, token);
             }, cancellationToken);
 
+        public Task<PdfPixels> RenderPixelsAsync(PdfRequest request, Index page, RenderOptions options, CancellationToken cancellationToken) =>
+            ExecuteAsync(request, (worker, count, token) =>
+            {
+                var offset = page.GetOffset(count);
+
+                if (offset < 0 || offset >= count)
+                    throw new ArgumentOutOfRangeException(nameof(page), $"The page must be between 0 and {count - 1}.");
+
+                return worker.RenderPixelsAsync(offset, options, _transferMode, _tempDirectory, token);
+            }, cancellationToken);
+
         public async Task ReleaseDocumentAsync(PdfRequest request)
         {
-            if (_retainDocuments)
+            // Temporary copies are deleted when the request ends. Keeping them open would
+            // pin a deleted file in the worker. Byte copies have no identity to reuse.
+            if (_retainDocuments && !request.IsTemporaryFile && request.Identity is not null)
                 return;
 
             lock (_gate)
@@ -195,6 +286,9 @@ namespace PDFtoImage.Parallel.Internals
             try
             {
                 using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+
+                if (_prewarm)
+                    await EnsurePrewarmedAsync().WaitAsync(cancellation.Token).ConfigureAwait(false);
 
                 if (_parallelismSlots != null)
                 {

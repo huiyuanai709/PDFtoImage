@@ -399,6 +399,85 @@ namespace PDFtoImage.Parallel.Internals
             }
         }
 
+        internal static PdfPixels ReadPixels(byte[] payload, int offset = 0)
+        {
+            if (!TryReadBitmapHeader(payload, offset, out var width, out var height, out var colorType, out var alphaType, out var rowBytes, out var byteCount, out var pixels) ||
+                byteCount != payload.Length - pixels)
+                throw new InvalidDataException("A worker returned invalid bitmap metadata.");
+
+            return CopyPixels(payload, pixels, width, height, rowBytes, byteCount, colorType, alphaType);
+        }
+
+        internal static unsafe PdfPixels ReadMappedPixels(byte[] payload, int offset, FileStream file)
+        {
+            if (!TryReadBitmapHeader(payload, offset, out var width, out var height, out var colorType, out var alphaType, out var rowBytes, out var byteCount, out var pixels) ||
+                pixels != payload.Length || file.Length != byteCount)
+                throw new InvalidDataException("A worker returned invalid mapped bitmap metadata.");
+
+            var rented = ArrayPool<byte>.Shared.Rent(byteCount);
+            try
+            {
+                using var mapping = MemoryMappedFile.CreateFromFile(file, null, 0, MemoryMappedFileAccess.Read, HandleInheritability.None, leaveOpen: true);
+                using var view = mapping.CreateViewAccessor(0, byteCount, MemoryMappedFileAccess.Read);
+                byte* pointer = null;
+                try
+                {
+                    view.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
+                    fixed (byte* destination = rented)
+                        Buffer.MemoryCopy(pointer + view.PointerOffset, destination, rented.Length, byteCount);
+                }
+                finally
+                {
+                    if (pointer != null)
+                        view.SafeMemoryMappedViewHandle.ReleasePointer();
+                }
+
+                return new PdfPixels(rented, width, height, rowBytes, colorType, alphaType, pooled: true);
+            }
+            catch
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+                throw;
+            }
+        }
+
+        private static bool TryReadBitmapHeader(byte[] payload, int offset, out int width, out int height, out SKColorType colorType, out SKAlphaType alphaType, out int rowBytes, out int byteCount, out int pixels)
+        {
+            const int metadataSize = 6 * sizeof(int);
+            width = height = rowBytes = byteCount = pixels = 0;
+            colorType = default;
+            alphaType = default;
+
+            if (offset < 0 || offset > payload.Length - metadataSize)
+                return false;
+
+            using var reader = CreateReader(payload);
+            reader.BaseStream.Position = offset;
+            width = reader.ReadInt32();
+            height = reader.ReadInt32();
+            colorType = (SKColorType)reader.ReadInt32();
+            alphaType = (SKAlphaType)reader.ReadInt32();
+            rowBytes = reader.ReadInt32();
+            byteCount = reader.ReadInt32();
+            pixels = offset + metadataSize;
+            return IsSupportedBitmap(width, height, colorType, alphaType, rowBytes, byteCount);
+        }
+
+        private static PdfPixels CopyPixels(byte[] payload, int source, int width, int height, int rowBytes, int byteCount, SKColorType colorType, SKAlphaType alphaType)
+        {
+            var rented = ArrayPool<byte>.Shared.Rent(byteCount);
+            try
+            {
+                payload.AsSpan(source, byteCount).CopyTo(rented);
+                return new PdfPixels(rented, width, height, rowBytes, colorType, alphaType, pooled: true);
+            }
+            catch
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+                throw;
+            }
+        }
+
         private static bool IsSupportedBitmap(int width, int height, SKColorType colorType, SKAlphaType alphaType, int rowBytes, int byteCount)
         {
             if (width <= 0 || height <= 0 || rowBytes <= 0 || byteCount <= 0 || (long)rowBytes * height != byteCount)

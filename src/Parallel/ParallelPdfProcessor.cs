@@ -80,7 +80,18 @@ namespace PDFtoImage.Parallel
             _reuseFileStream = options.ReuseFileStream;
             _shareSourceFile = options.ShareSourceFile;
             _maxParallelism = options.SlotCount;
-            _pool = new WorkerPool(count, options.SlotCount, options.TransferMode, _tempDirectory, options.RetainDocuments);
+            _pool = new WorkerPool(count, options.SlotCount, options.TransferMode, _tempDirectory, options.RetainDocuments, options.PrewarmWorkers);
+        }
+
+        /// <summary>
+        /// Starts every worker process and completes when each one has connected.
+        /// Later renders reuse those processes. Safe to call more than once.
+        /// </summary>
+        /// <param name="cancellationToken">Cancels waiting. Worker startup continues so a later render can reuse it.</param>
+        public Task PrewarmAsync(CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _pool.PrewarmAsync(cancellationToken);
         }
 
         internal int[] WorkerProcessIds => _pool.WorkerProcessIds;
@@ -205,6 +216,55 @@ namespace PDFtoImage.Parallel
             ArgumentNullException.ThrowIfNull(pages);
 
             return ToImagesFromPagesAsync(pdfStream, pages, leaveOpen, password, options, cancellationToken);
+        }
+
+        /// <inheritdoc />
+        public async Task<PdfPixels> ToPixelsAsync(Stream pdfStream, Index page = default, bool leaveOpen = false, string? password = null, RenderOptions options = default, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(pdfStream);
+            PdfPixels? pixels = null;
+            try
+            {
+                var (request, pdf) = await BeginAndReadPdfAsync(pdfStream, leaveOpen, password, cancellationToken).ConfigureAwait(false);
+                using (request)
+                using (pdf)
+                {
+                    pixels = await RenderOneAsync(pdf, page, options, static (pool, request, page, options, token) => pool.RenderPixelsAsync(request, page, options, token), request.Token).ConfigureAwait(false);
+                    return pixels;
+                }
+            }
+            catch
+            {
+                pixels?.Dispose();
+                throw;
+            }
+        }
+
+        /// <inheritdoc />
+        public IAsyncEnumerable<PdfPixels> ToImagesPixelsAsync(Stream pdfStream, IEnumerable<int> pages, bool leaveOpen = false, string? password = null, RenderOptions options = default, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(pages);
+            return ToPixelsFromPagesAsync(pdfStream, pages, leaveOpen, password, options, cancellationToken);
+        }
+
+        private async IAsyncEnumerable<PdfPixels> ToPixelsFromPagesAsync(Stream pdfStream, IEnumerable<int> pages, bool leaveOpen, string? password, RenderOptions options, [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(pdfStream);
+            PageSelection selection;
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                selection = PageSelection.FromPages([.. pages]);
+            }
+            catch
+            {
+                if (!leaveOpen)
+                    await pdfStream.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+
+            await foreach (var pixels in CollectAsync(pdfStream, selection, leaveOpen, password, options, static (pool, request, page, options, token) => pool.RenderPixelsAsync(request, page, options, token), cancellationToken).ConfigureAwait(false))
+                yield return pixels;
         }
 
         private async IAsyncEnumerable<SKBitmap> ToImagesFromPagesAsync(Stream pdfStream, IEnumerable<int> pages, bool leaveOpen, string? password, RenderOptions options, [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -375,6 +435,102 @@ namespace PDFtoImage.Parallel
 
             if (errors != null)
                 throw new AggregateException("PDF file request cleanup failed.", errors);
+        }
+
+        private async Task<T> RenderOneAsync<T>(PdfRequest request, Index page, RenderOptions options, Func<WorkerPool, PdfRequest, Index, RenderOptions, CancellationToken, Task<T>> render, CancellationToken cancellationToken) where T : IDisposable
+        {
+            _pool.ThrowIfDisposed();
+            T? result = default;
+            try
+            {
+                try
+                {
+                    result = await render(_pool, request, page, options, cancellationToken).ConfigureAwait(false);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return result;
+                }
+                finally
+                {
+                    await _pool.ReleaseDocumentAsync(request).ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+                result?.Dispose();
+                throw;
+            }
+        }
+
+        private async IAsyncEnumerable<T> CollectAsync<T>(Stream pdfStream, PageSelection pages, bool leaveOpen, string? password, RenderOptions options, Func<WorkerPool, PdfRequest, int, RenderOptions, CancellationToken, Task<T>> render, [EnumeratorCancellation] CancellationToken cancellationToken) where T : IDisposable
+        {
+            ArgumentNullException.ThrowIfNull(pdfStream);
+            CancellationTokenSource enumerationCancellation;
+
+            var (initialRequest, openedPdf) = await BeginAndReadPdfAsync(pdfStream, leaveOpen, password, cancellationToken).ConfigureAwait(false);
+            using var pdf = openedPdf;
+            using (var request = initialRequest)
+                enumerationCancellation = CreateEnumerationCancellation(cancellationToken);
+
+            using (enumerationCancellation)
+            {
+                var iterator = RenderSelectionAsync(pdf, pages, options, render, enumerationCancellation.Token)
+                    .GetAsyncEnumerator(enumerationCancellation.Token);
+                await using var iteratorCleanup = iterator.ConfigureAwait(false);
+
+                while (true)
+                {
+                    T image;
+
+                    using (var request = BeginRequest(enumerationCancellation.Token))
+                    {
+                        if (!await iterator.MoveNextAsync().ConfigureAwait(false))
+                            yield break;
+
+                        image = iterator.Current;
+                    }
+
+                    yield return image;
+                }
+            }
+        }
+
+        private async IAsyncEnumerable<T> RenderSelectionAsync<T>(PdfRequest request, PageSelection pages, RenderOptions options, Func<WorkerPool, PdfRequest, int, RenderOptions, CancellationToken, Task<T>> render, [EnumeratorCancellation] CancellationToken cancellationToken) where T : IDisposable
+        {
+            _pool.ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (pages.MaximumCount == 0)
+                yield break;
+
+            try
+            {
+                var pageCount = await _pool.GetPageCountAsync(request, cancellationToken).ConfigureAwait(false);
+                var pageNumbers = pages.Resolve(pageCount);
+
+                if (pageNumbers.Length == 0)
+                    yield break;
+
+                await foreach (var image in OrderedScheduler.RunAsync(
+                    pageNumbers, (int)Math.Min(pageNumbers.Length, (long)Math.Min(_pool.WorkerCount, _maxParallelism ?? int.MaxValue) * 2),
+                    (page, token) => render(_pool, request, page, options, token), cancellationToken).ConfigureAwait(false))
+                {
+                    try
+                    {
+                        _pool.ThrowIfDisposed();
+                    }
+                    catch
+                    {
+                        image.Dispose();
+                        throw;
+                    }
+
+                    yield return image;
+                }
+            }
+            finally
+            {
+                await _pool.ReleaseDocumentAsync(request).ConfigureAwait(false);
+            }
         }
 
         private async Task<SKBitmap> ToImageCoreAsync(PdfRequest request, Index page, RenderOptions options, CancellationToken cancellationToken)

@@ -28,5 +28,19 @@ namespace PDFtoImage.Parallel
 
         /// <summary>Renders selected pages in the requested order.</summary>
         IAsyncEnumerable<SKBitmap> ToImagesAsync(Stream pdfStream, IEnumerable<int> pages, bool leaveOpen = false, string? password = null, RenderOptions options = default, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Starts the worker processes and completes when they have connected.
+        /// </summary>
+        /// <param name="cancellationToken">Cancels waiting for startup.</param>
+        Task PrewarmAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Renders one page to packed pixels. Grayscale output is 8-bit gray, not expanded to BGRA.
+        /// </summary>
+        Task<PdfPixels> ToPixelsAsync(Stream pdfStream, Index page = default, bool leaveOpen = false, string? password = null, RenderOptions options = default, CancellationToken cancellationToken = default);
+
+        /// <summary>Renders selected pages to packed pixels, in the requested order.</summary>
+        IAsyncEnumerable<PdfPixels> ToImagesPixelsAsync(Stream pdfStream, IEnumerable<int> pages, bool leaveOpen = false, string? password = null, RenderOptions options = default, CancellationToken cancellationToken = default);
     }
 }

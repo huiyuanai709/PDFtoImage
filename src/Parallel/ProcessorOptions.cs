@@ -47,11 +47,19 @@ namespace PDFtoImage.Parallel
         public bool ShareSourceFile { get; init; }
 
         /// <summary>
-        /// Keep a worker's opened file PDF across calls when the path, length, last-write time, and password match.
-        /// The next lease then skips parsing the file again. Byte-array requests are not reused.
+        /// Keep a worker's opened file PDF across calls when the path, length, creation time, last-write time,
+        /// file identity, sampled contents, and password match. The next lease then skips parsing the file again.
+        /// Byte-array requests and temporary copies are not reused, because those files are deleted with the call.
         /// The default is <see langword="false"/>, which unloads the document when the call finishes.
         /// </summary>
         public bool RetainDocuments { get; init; }
+
+        /// <summary>
+        /// Start <see cref="WorkerCount"/> worker processes as soon as the processor is constructed.
+        /// The first render waits for them if they are not connected yet. <see cref="ParallelPdfProcessor.PrewarmAsync"/>
+        /// waits for the same startup. The default is <see langword="false"/>, which starts a worker on its first job.
+        /// </summary>
+        public bool PrewarmWorkers { get; init; }
 
         /// <summary>
         /// Directory for temporary PDF and bitmap files in <see cref="ProcessorTransferMode.MemoryMappedFile"/> mode only.

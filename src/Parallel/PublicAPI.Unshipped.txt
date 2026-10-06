@@ -1,4 +1,12 @@
 #nullable enable
+PDFtoImage.Parallel.IParallelPdfProcessor.PrewarmAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+PDFtoImage.Parallel.IParallelPdfProcessor.ToImagesPixelsAsync(System.IO.Stream! pdfStream, System.Collections.Generic.IEnumerable<int>! pages, bool leaveOpen = false, string? password = null, PDFtoImage.RenderOptions options = default(PDFtoImage.RenderOptions), System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<PDFtoImage.PdfPixels!>!
+PDFtoImage.Parallel.IParallelPdfProcessor.ToPixelsAsync(System.IO.Stream! pdfStream, System.Index page = default(System.Index), bool leaveOpen = false, string? password = null, PDFtoImage.RenderOptions options = default(PDFtoImage.RenderOptions), System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PDFtoImage.PdfPixels!>!
+PDFtoImage.Parallel.ParallelPdfProcessor.PrewarmAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+PDFtoImage.Parallel.ParallelPdfProcessor.ToImagesPixelsAsync(System.IO.Stream! pdfStream, System.Collections.Generic.IEnumerable<int>! pages, bool leaveOpen = false, string? password = null, PDFtoImage.RenderOptions options = default(PDFtoImage.RenderOptions), System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<PDFtoImage.PdfPixels!>!
+PDFtoImage.Parallel.ParallelPdfProcessor.ToPixelsAsync(System.IO.Stream! pdfStream, System.Index page = default(System.Index), bool leaveOpen = false, string? password = null, PDFtoImage.RenderOptions options = default(PDFtoImage.RenderOptions), System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PDFtoImage.PdfPixels!>!
+PDFtoImage.Parallel.ProcessorOptions.PrewarmWorkers.get -> bool
+PDFtoImage.Parallel.ProcessorOptions.PrewarmWorkers.init -> void
 PDFtoImage.Parallel.ProcessorOptions.RetainDocuments.get -> bool
 PDFtoImage.Parallel.ProcessorOptions.RetainDocuments.init -> void
 PDFtoImage.Parallel.ProcessorOptions.ShareSourceFile.get -> bool
