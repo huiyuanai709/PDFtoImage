@@ -652,6 +652,89 @@ namespace PDFtoImage.Tests
             File.Delete(Path.Combine(fixture.TempDirectory, "stamp-a.pdf"));
         }
 
+        [TestMethod]
+        public async Task ReleaseRetainedFileDropsWorkerHandle()
+        {
+            using var fixture = new FileFixture();
+            var full = Path.GetFullPath(fixture.InputPath);
+            await using var processor = new ParallelPdfProcessor(new ProcessorOptions
+            {
+                WorkerCount = 2,
+                TransferMode = ProcessorTransferMode.MemoryMappedFile,
+                TempDirectory = fixture.TempDirectory,
+                ReuseFileStream = true,
+                RetainDocuments = true,
+            });
+            var options = new RenderOptions(Dpi: 40);
+            await using var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            await foreach (var page in processor.ToImagesAsync(stream, [0, 1], leaveOpen: true, options: options, cancellationToken: TestContext!.CancellationToken))
+                page.Dispose();
+
+            Assert.IsTrue(processor.WorkerDocumentIds.Any(id => id != null));
+            var pids = processor.WorkerProcessIds;
+            if (OperatingSystem.IsLinux())
+                Assert.IsTrue(pids.Any(pid => ProcessReferencesPath(pid, full)), "A render worker should still have the PDF open.");
+
+            var other = Path.Combine(fixture.TempDirectory, "other.pdf");
+            File.WriteAllBytes(other, Pdf);
+            await processor.ReleaseRetainedFileAsync(other, TestContext.CancellationToken);
+            Assert.IsTrue(processor.WorkerDocumentIds.Any(id => id != null), "Releasing a different path must leave the retained PDF loaded.");
+            if (OperatingSystem.IsLinux())
+                Assert.IsTrue(pids.Any(pid => ProcessReferencesPath(pid, full)));
+
+            await processor.ReleaseRetainedFileAsync(full, TestContext.CancellationToken);
+            Assert.IsTrue(processor.WorkerDocumentIds.All(id => id == null));
+            if (OperatingSystem.IsLinux())
+                Assert.IsFalse(pids.Any(pid => ProcessReferencesPath(pid, full)), "Workers should have closed the PDF handle and mapping.");
+
+            var loads = processor.WorkerDocumentLoadCounts.Sum();
+            using (var again = await processor.ToImageAsync(stream, leaveOpen: true, options: options, cancellationToken: TestContext.CancellationToken))
+                Assert.IsGreaterThan(0, again.Width);
+            Assert.IsGreaterThan(loads, processor.WorkerDocumentLoadCounts.Sum());
+
+            await processor.ReleaseRetainedFileAsync(full, TestContext.CancellationToken);
+            File.Delete(other);
+        }
+
+        private static bool ProcessReferencesPath(int pid, string fullPath)
+        {
+            if (pid <= 0 || !OperatingSystem.IsLinux())
+                return false;
+
+            var fdDir = "/proc/" + pid + "/fd";
+            if (Directory.Exists(fdDir))
+            {
+                foreach (var fd in Directory.EnumerateFiles(fdDir))
+                {
+                    try
+                    {
+                        var target = File.ResolveLinkTarget(fd, returnFinalTarget: false);
+                        if (target != null && string.Equals(target.FullName, fullPath, StringComparison.Ordinal))
+                            return true;
+                    }
+                    catch (IOException) { }
+                    catch (UnauthorizedAccessException) { }
+                }
+            }
+
+            var maps = "/proc/" + pid + "/maps";
+            if (!File.Exists(maps))
+                return false;
+
+            try
+            {
+                foreach (var line in File.ReadLines(maps))
+                {
+                    if (line.Contains(fullPath, StringComparison.Ordinal))
+                        return true;
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+
+            return false;
+        }
+
         private static string WritePdf(string directory, string name, byte[] bytes)
         {
             var path = Path.Combine(directory, name);

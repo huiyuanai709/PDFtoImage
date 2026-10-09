@@ -38,6 +38,10 @@ namespace PDFtoImage.Parallel.Internals
 
         private readonly SemaphoreSlim _documentCleanup = new(1, 1);
 
+        private int _epoch;
+
+        private TaskCompletionSource _epochChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         private readonly CancellationTokenSource _shutdown = new();
 
         private readonly TaskCompletionSource _drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -127,6 +131,7 @@ namespace PDFtoImage.Parallel.Internals
                         var slot = new Slot { Worker = worker };
                         _workers.Add(slot);
                         _available.Push(slot);
+                        PulseLocked();
                     }
                 }
             }
@@ -195,6 +200,7 @@ namespace PDFtoImage.Parallel.Internals
         {
             // Temporary copies are deleted when the request ends. Keeping them open would
             // pin a deleted file in the worker. Byte copies have no identity to reuse.
+            // RetainDocuments leaves the file mapped until ReleaseRetainedFileAsync.
             if (_retainDocuments && !request.IsTemporaryFile && request.Identity is not null)
                 return;
 
@@ -358,7 +364,10 @@ namespace PDFtoImage.Parallel.Internals
                     // observes the stack and semaphore under the same gate, so it must never
                     // see a slot before its semaphore permit (or vice versa).
                     if (slot != null)
+                    {
                         _available.Push(slot);
+                        PulseLocked();
+                    }
 
                     if (acquired)
                         _slots.Release();
@@ -450,8 +459,183 @@ namespace PDFtoImage.Parallel.Internals
                 {
                     _available.Push(slot);
                     _slots.Release();
+                    PulseLocked();
                 }
             }
+        }
+
+        internal async Task ReleaseRetainedFileAsync(string fullPath, CancellationToken cancellationToken)
+        {
+            var counted = false;
+
+            lock (_gate)
+            {
+                if (_disposed)
+                    return;
+
+                _activeOperations++;
+                counted = true;
+            }
+
+            var cleanupAcquired = false;
+
+            try
+            {
+                await _documentCleanup.WaitAsync(cancellationToken).ConfigureAwait(false);
+                cleanupAcquired = true;
+
+                while (true)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var idle = new List<Slot>();
+                    int epoch;
+                    var busyHolder = false;
+
+                    lock (_gate)
+                    {
+                        if (_disposed)
+                            return;
+
+                        epoch = _epoch;
+                        var idleSet = new HashSet<Slot>(_available);
+
+                        foreach (var slot in _workers)
+                        {
+                            if (HoldsFile(slot, fullPath) && !idleSet.Contains(slot))
+                                busyHolder = true;
+                        }
+
+                        var attempts = _available.Count;
+                        for (var i = 0; i < attempts; i++)
+                        {
+                            if (!_slots.Wait(0) || !_available.TryPop(out var slot))
+                                break;
+
+                            if (HoldsFile(slot, fullPath))
+                                idle.Add(slot);
+                            else
+                            {
+                                _available.Push(slot);
+                                _slots.Release();
+                            }
+                        }
+                    }
+
+                    if (idle.Count == 0 && !busyHolder)
+                        return;
+
+                    await Task.WhenAll(idle.Select(slot => UnloadRetainedSlotAsync(slot, fullPath))).ConfigureAwait(false);
+
+                    if (!busyHolder)
+                    {
+                        lock (_gate)
+                        {
+                            if (_disposed || !_workers.Any(slot => HoldsFile(slot, fullPath)))
+                                return;
+                        }
+
+                        continue;
+                    }
+
+                    await WaitForEpochAsync(epoch, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                if (cleanupAcquired)
+                    _documentCleanup.Release();
+
+                if (counted)
+                {
+                    lock (_gate)
+                    {
+                        _activeOperations--;
+                        CompleteDisposalIfDrained();
+                    }
+                }
+            }
+        }
+
+        private async Task UnloadRetainedSlotAsync(Slot slot, string fullPath)
+        {
+            try
+            {
+                var worker = slot.Worker;
+
+                if (worker != null && HoldsFile(slot, fullPath) && worker.DocumentId is Guid id)
+                    await worker.UnloadDocumentAsync(id, _shutdown.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+            {
+                // Pool disposal is already terminating the worker.
+            }
+            catch
+            {
+                var worker = slot.Worker;
+
+                lock (_gate)
+                {
+                    slot.Worker = null;
+                }
+
+                worker?.Dispose();
+            }
+            finally
+            {
+                lock (_gate)
+                {
+                    _available.Push(slot);
+                    _slots.Release();
+                    PulseLocked();
+                }
+            }
+        }
+
+        private void PulseLocked()
+        {
+            _epoch++;
+            var pending = _epochChanged;
+            _epochChanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            pending.TrySetResult();
+        }
+
+        private async Task WaitForEpochAsync(int seen, CancellationToken cancellationToken)
+        {
+            Task wait;
+
+            lock (_gate)
+            {
+                if (_disposed || _epoch != seen)
+                    return;
+
+                wait = _epochChanged.Task;
+            }
+
+            await wait.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        private static bool HoldsFile(Slot slot, string fullPath) =>
+            SameFile(slot.Worker?.LoadedFilePath, fullPath);
+
+        private static bool SameFile(string? loaded, string fullPath)
+        {
+            if (string.IsNullOrEmpty(loaded))
+                return false;
+
+            string other;
+
+            try
+            {
+                other = Path.GetFullPath(loaded);
+            }
+            catch (Exception)
+            {
+                other = loaded;
+            }
+
+            return OperatingSystem.IsWindows()
+                ? string.Equals(other, fullPath, StringComparison.OrdinalIgnoreCase)
+                : string.Equals(other, fullPath, StringComparison.Ordinal);
         }
 
         private void CompleteDisposalIfDrained()

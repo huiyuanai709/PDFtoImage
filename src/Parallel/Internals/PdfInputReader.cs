@@ -16,8 +16,10 @@ namespace PDFtoImage.Parallel.Internals
             FileStream? readable = null;
             try
             {
+                // Share.Delete matches the owner's handle. This reopen must not veto unlinking the path
+                // after workers have dropped their mapping.
                 readable = new FileStream(source.Name, FileMode.Open, FileAccess.Read,
-                    FileShare.Read, BufferSize, FileOptions.RandomAccess);
+                    FileShare.Read | FileShare.Delete, BufferSize, FileOptions.RandomAccess);
                 if (readable.Length == source.Length)
                     return readable;
             }

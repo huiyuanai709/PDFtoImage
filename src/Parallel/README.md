@@ -119,6 +119,8 @@ await using var converter = new PDFtoImage.Parallel.ParallelPdfProcessor(
 
 Keep the same processor across leases. A new processor pays worker startup again. Set `PrewarmWorkers` and await `PrewarmAsync` during node startup so the first lease does not pay that startup. The file must stay unchanged while a worker has it open. Replacing its contents, length, creation time, last-write time, or file identity makes the next call reload it. Non-file streams are still copied. Temporary copies are not retained, because the processor deletes them when the call finishes. `MemoryMappedFile` already avoids the PDF copy for a readable `FileStream` and does not need `ShareSourceFile`.
 
+`ReleaseRetainedFileAsync` closes that path in every worker, including the file handle and the memory mapping, and completes after those workers acknowledge. Until then Windows cannot delete the file. Workers busy with a different PDF are left alone.
+
 `ToImage` and `ToImages` still return BGRA bitmaps. `ToPixelsAsync` and `ToImagesPixelsAsync` return the packed buffer the worker produced: 8-bit gray when `Grayscale` is set and tiling is not, including `NativeGrayscale`. Dispose each `PdfPixels` when OCR is done; that returns the buffer to the pool.
 
 ## Technical considerations

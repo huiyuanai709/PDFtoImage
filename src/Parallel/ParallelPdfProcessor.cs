@@ -94,6 +94,18 @@ namespace PDFtoImage.Parallel
             return _pool.PrewarmAsync(cancellationToken);
         }
 
+        /// <summary>
+        /// Closes a retained file PDF in every worker that still has it loaded.
+        /// </summary>
+        /// <param name="path">Path of the PDF previously opened from a <see cref="FileStream"/>.</param>
+        /// <param name="cancellationToken">Cancels waiting for a busy worker. An unload already sent is still read to completion.</param>
+        public Task ReleaseRetainedFileAsync(string path, CancellationToken cancellationToken = default)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(path);
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _pool.ReleaseRetainedFileAsync(Path.GetFullPath(path), cancellationToken);
+        }
+
         internal int[] WorkerProcessIds => _pool.WorkerProcessIds;
 
         internal Guid?[] WorkerDocumentIds => _pool.WorkerDocumentIds;
