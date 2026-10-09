@@ -151,6 +151,9 @@ namespace PDFtoImage.Internals
             public static extern void FPDF_InitLibrary();
 
             [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
+            public static extern void FPDF_InitLibraryWithConfig(IntPtr config);
+
+            [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
             public static extern void FPDF_DestroyLibrary();
 
             [DllImport("pdfium", CallingConvention = CallingConvention.Cdecl)]
