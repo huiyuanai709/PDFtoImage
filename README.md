@@ -72,6 +72,8 @@ This is not a GPU surface. `FPDF_RenderPageSkia` wants an `SkCanvas` from the Sk
 
 Compare AGG and Skia by running the same pages twice, once with `PDFTOIMAGE_RENDERER=agg` and once with `skia`, and diff the Gray8 buffers or the OCR text. One process cannot switch after the first PDF call. Expect small antialiasing and hinting differences; do not require byte-identical pages.
 
+The Linux x64 library that actually exports `FPDF_RenderPageSkia` is not on NuGet. [`etc/pdfium-skia/build-linux-x64.sh`](etc/pdfium-skia/build-linux-x64.sh) builds PDFium `chromium/8066` (same revision as `bblanchon.PDFium` 156.0.8066) with `pdf_use_skia` and `pdf_use_agg`, and writes one `libpdfium.so` to drop in beside the app. Chrome's in-process PDF API, Edge WebView2, and headless Chrome screenshots do not replace that library; [`etc/pdfium-skia/README.md`](etc/pdfium-skia/README.md) says why.
+
 ### Unity project installation
 1. Open your project and navigate to `Window` → `Package Management` → `Package Manager`.
 1. Click on the `+` button (top-left corner) and select `Install package from git URL...`.
