@@ -20,6 +20,62 @@ namespace PDFtoImage.Internals
             }
         }
 
+        /// <summary>
+        /// Initializes PDFium with <c>FPDF_LIBRARY_CONFIG</c> version 4.
+        /// <paramref name="rendererType"/> is <c>FPDF_RENDERERTYPE_AGG</c> (0) or <c>FPDF_RENDERERTYPE_SKIA</c> (1).
+        /// Skia is only valid when <see cref="HasSkiaRenderExport"/> is true; an AGG-only build crashes otherwise.
+        /// </summary>
+        public static void InitLibraryWithRenderer(int rendererType)
+        {
+            lock (LockString)
+            {
+#if NET6_0_OR_GREATER && !BROWSER
+                var config = PdfiumRendererConfig.Allocate(rendererType);
+                try
+                {
+                    Imports.FPDF_InitLibraryWithConfig(config);
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(config);
+                }
+#else
+                _ = rendererType;
+                Imports.FPDF_InitLibrary();
+#endif
+            }
+        }
+
+        /// <summary>
+        /// True when this pdfium was built with <c>PDF_USE_SKIA</c>.
+        /// The export is the probe; this method does not call it and does not initialize the library.
+        /// </summary>
+        public static bool HasSkiaRenderExport()
+        {
+#if NETCOREAPP && !BROWSER
+            try
+            {
+                if (!NativeLibrary.TryLoad(
+                        "pdfium",
+                        typeof(NativeMethods).Assembly,
+                        searchPath: null,
+                        out var handle)
+                    || handle == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                return NativeLibrary.TryGetExport(handle, "FPDF_RenderPageSkia", out _);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+#else
+            return false;
+#endif
+        }
+
         public static void DestroyLibrary()
         {
             lock (LockString)
