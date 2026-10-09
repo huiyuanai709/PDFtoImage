@@ -23,6 +23,8 @@ PDFtoImage.Conversion.SavePng(
 
 `SaveJpeg`, `SavePng`, `SaveWebp`, and `ToImage` render a single page. `ToImages` and `ToImagesAsync` render multiple pages. `PdfSession` keeps a document open so later pages skip another parse. `PdfSession.RenderPixels` returns packed BGRA, or 8-bit gray when `Grayscale` is set and tiling is not. `NativeGrayscale` renders that gray buffer in PDFium instead of packing a BGRA image; `ToImage` ignores the flag. Dispose `PdfPixels` when you are done with the buffer.
 
+`PDFTOIMAGE_RENDERER=skia` (or `PdfRenderExperiment.Select(PdfRenderBackend.Skia)` before the first PDF call) asks PDFium to fill that same CPU bitmap with its Skia backend. The stock PDFium binaries do not export `FPDF_RenderPageSkia`, so the request falls back to AGG and `PdfRenderExperiment.FallbackReason` says why. The switch is process-wide. It is not a GPU surface: `FPDF_RenderPageSkia` needs an `SkCanvas` from the Skia linked into that PDFium build, which is not SkiaSharp.
+
 Dispose returned `SKBitmap` instances after use. To save one, use [`SKBitmap.Encode`](https://learn.microsoft.com/en-us/dotnet/api/skiasharp.skbitmap.encode?view=skiasharp).
 
 ### Unity project installation
