@@ -51,6 +51,7 @@ namespace PDFtoImage.Parallel
         /// file identity, sampled contents, and password match. The next lease then skips parsing the file again.
         /// Byte-array requests and temporary copies are not reused, because those files are deleted with the call.
         /// The default is <see langword="false"/>, which unloads the document when the call finishes.
+        /// A kept file stays mapped until <see cref="ParallelPdfProcessor.ReleaseRetainedFileAsync"/> or disposal.
         /// </summary>
         public bool RetainDocuments { get; init; }
 

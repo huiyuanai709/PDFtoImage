@@ -39,6 +39,8 @@ namespace PDFtoImage.Parallel.Internals
 
         internal Guid? DocumentId => _documentId;
 
+        internal string? LoadedFilePath => _loadedIdentity?.Path;
+
         internal int DocumentLoadCount => _documentLoadCount;
 
         internal static async Task<WorkerConnection> StartAsync(CancellationToken cancellationToken)

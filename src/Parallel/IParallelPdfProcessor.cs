@@ -36,6 +36,16 @@ namespace PDFtoImage.Parallel
         Task PrewarmAsync(CancellationToken cancellationToken = default);
 
         /// <summary>
+        /// Closes a file PDF that <see cref="ProcessorOptions.RetainDocuments"/> kept open in worker
+        /// processes, including its file handle and memory mapping. Completes after every worker that
+        /// had <paramref name="path"/> loaded has acknowledged the close. Workers that are busy with
+        /// that file are waited on; workers rendering a different file are left alone.
+        /// </summary>
+        /// <param name="path">The PDF path previously rendered from a <see cref="FileStream"/>.</param>
+        /// <param name="cancellationToken">Cancels waiting. A worker already sent an unload is still read to completion.</param>
+        Task ReleaseRetainedFileAsync(string path, CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Renders one page to packed pixels. Grayscale output is 8-bit gray, not expanded to BGRA.
         /// </summary>
         Task<PdfPixels> ToPixelsAsync(Stream pdfStream, Index page = default, bool leaveOpen = false, string? password = null, RenderOptions options = default, CancellationToken cancellationToken = default);
