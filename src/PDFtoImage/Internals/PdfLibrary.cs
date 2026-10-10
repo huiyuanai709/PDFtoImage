@@ -28,7 +28,7 @@ namespace PDFtoImage.Internals
 
         private PdfLibrary()
         {
-            NativeMethods.InitLibrary();
+            PDFtoImage.PdfRenderExperiment.InitializeNative();
         }
 
         ~PdfLibrary()

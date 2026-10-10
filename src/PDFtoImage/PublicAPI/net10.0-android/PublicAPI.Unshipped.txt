@@ -40,3 +40,17 @@ PDFtoImage.RenderOptions.NativeGrayscale.init -> void
 PDFtoImage.Resource
 PDFtoImage.Resource.Resource() -> void
 static PDFtoImage.PdfSession.Open(System.IO.Stream! pdfStream, bool leaveOpen = false, string? password = null) -> PDFtoImage.PdfSession!
+PDFtoImage.PdfRenderBackend
+PDFtoImage.PdfRenderBackend.Agg = 0 -> PDFtoImage.PdfRenderBackend
+PDFtoImage.PdfRenderBackend.Skia = 1 -> PDFtoImage.PdfRenderBackend
+PDFtoImage.PdfRenderExperiment
+static PDFtoImage.PdfRenderExperiment.Actual.get -> PDFtoImage.PdfRenderBackend
+static PDFtoImage.PdfRenderExperiment.Choose(PDFtoImage.PdfRenderBackend requested, bool skiaBuildPresent) -> PDFtoImage.PdfRenderBackend
+const PDFtoImage.PdfRenderExperiment.EnvironmentVariable = "PDFTOIMAGE_RENDERER" -> string!
+static PDFtoImage.PdfRenderExperiment.FallbackReason.get -> string?
+static PDFtoImage.PdfRenderExperiment.FallbackReasonFor(PDFtoImage.PdfRenderBackend requested, bool skiaBuildPresent) -> string?
+static PDFtoImage.PdfRenderExperiment.Parse(string? value) -> PDFtoImage.PdfRenderBackend
+static PDFtoImage.PdfRenderExperiment.ProbeSkiaBuild() -> bool
+static PDFtoImage.PdfRenderExperiment.Requested.get -> PDFtoImage.PdfRenderBackend
+static PDFtoImage.PdfRenderExperiment.Select(PDFtoImage.PdfRenderBackend backend) -> void
+static PDFtoImage.PdfRenderExperiment.SkiaBuildPresent.get -> bool

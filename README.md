@@ -55,6 +55,27 @@ var needsOcr = analysis.Content.TextObjectsAreInvisible
 
 PDFium calls in a process take one shared lock. Extra threads calling `ToImages` on copies of the same PDF do not render faster, and each call parses the file again. Use one `PdfSession` on a single thread, or [PDFtoImage.Parallel](src/Parallel/README.md) when the work should use several cores. For a large PDF, `ProcessorTransferMode.MemoryMappedFile` keeps one shared file instead of copying the PDF into every worker. Opaque grayscale pages are transferred as 8-bit gray and expanded back to the same BGRA bitmap in the host.
 
+### Experimental Skia CPU renderer
+
+Stock `bblanchon.PDFium` builds do not export `FPDF_RenderPageSkia` (`PDF_USE_SKIA` is off). The default renderer stays AGG, which is what `FPDF_RenderPageBitmap` uses today.
+
+```csharp
+// Before the first PDF call in this process.
+PDFtoImage.PdfRenderExperiment.Select(PDFtoImage.PdfRenderBackend.Skia);
+```
+
+Or set `PDFTOIMAGE_RENDERER=skia` (default `agg`). The choice is process-wide. Parallel workers read the environment variable themselves; a `Select` call in the parent does not cross the process boundary.
+
+When the export exists, initialization uses `FPDF_InitLibraryWithConfig` version 4 with `FPDF_RENDERERTYPE_SKIA`. Pages still land in the same CPU bitmap: BGRA, or 8-bit gray when `NativeGrayscale` is set. When the export is missing, `Actual` stays AGG, `FallbackReason` explains why, and rendering does not change. Passing Skia into an AGG-only binary crashes inside PDFium, so that call is not made.
+
+This is not a GPU surface. `FPDF_RenderPageSkia` wants an `SkCanvas` from the Skia linked into that PDFium, not SkiaSharp's `libSkiaSharp`. A GPU-backed canvas is a later step.
+
+Compare AGG and Skia by running the same pages twice, once with `PDFTOIMAGE_RENDERER=agg` and once with `skia`, and diff the Gray8 buffers or the OCR text. One process cannot switch after the first PDF call. Expect small antialiasing and hinting differences; do not require byte-identical pages.
+
+The Linux x64 library that actually exports `FPDF_RenderPageSkia` is not on NuGet. [`etc/pdfium-skia/build-linux-x64.sh`](etc/pdfium-skia/build-linux-x64.sh) builds PDFium `chromium/8066` (same revision as `bblanchon.PDFium` 156.0.8066) with `pdf_use_skia` and `pdf_use_agg`, and writes one `libpdfium.so` to drop in beside the app. Chrome's in-process PDF API, Edge WebView2, and headless Chrome screenshots do not replace that library; [`etc/pdfium-skia/README.md`](etc/pdfium-skia/README.md) says why.
+
+The same recipe is also a GitHub Actions job, [PDFium Skia linux-x64](.github/workflows/pdfium-skia-linux.yml). On a public repository the artifact is `libpdfium-skia-linux-x64`. Details and runner limits are in [`etc/pdfium-skia/README.md`](etc/pdfium-skia/README.md).
+
 ### Unity project installation
 1. Open your project and navigate to `Window` → `Package Management` → `Package Manager`.
 1. Click on the `+` button (top-left corner) and select `Install package from git URL...`.

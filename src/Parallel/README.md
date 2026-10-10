@@ -123,6 +123,8 @@ Keep the same processor across leases. A new processor pays worker startup again
 
 `ToImage` and `ToImages` still return BGRA bitmaps. `ToPixelsAsync` and `ToImagesPixelsAsync` return the packed buffer the worker produced: 8-bit gray when `Grayscale` is set and tiling is not, including `NativeGrayscale`. Dispose each `PdfPixels` when OCR is done; that returns the buffer to the pool.
 
+Workers inherit `PDFTOIMAGE_RENDERER`. Set it to `skia` or `agg` before the pool starts. Each worker initializes its own PDFium, so a `PdfRenderExperiment.Select` call in the parent does not change the workers. A missing `FPDF_RenderPageSkia` export keeps that worker on AGG. The pixels stay BGRA or Gray8 either way.
+
 ## Technical considerations
 ### Worker pool and lifetime
 Workers start on demand and are reused until the processor is disposed. Set `WorkerCount` to control the pool size. Set `SlotCount` to a positive number to cap simultaneous worker operations across requests; its default `null` leaves the worker count as the only limit. The ordered page scheduler also limits its look-ahead to this setting. This provides backpressure for services with a large worker pool.

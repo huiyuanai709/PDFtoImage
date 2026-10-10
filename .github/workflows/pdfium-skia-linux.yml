@@ -1,0 +1,125 @@
+# Manual / path-filtered build of one linux-x64 libpdfium.so with AGG and Skia.
+# Public ubuntu-24.04 is 4 vCPU and 16 GB RAM. The documented free-disk floor
+# is 14 GB; public runners currently have ~90 GB free. Private ubuntu-latest
+# (2 vCPU, 8 GB, ~14 GB free) is too small. See etc/pdfium-skia/README.md.
+
+name: PDFium Skia linux-x64
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: >-
+          Runner label. ubuntu-24.04 is the free public runner.
+          Larger labels (ubuntu-latest-8-cores and similar) need Team or
+          Enterprise and are billed per minute.
+        required: true
+        default: ubuntu-24.04
+        type: string
+      ninja_jobs:
+        description: Ninja parallelism. 2 matches a 16 GB runner.
+        required: true
+        default: "2"
+        type: string
+      publish_release:
+        description: >-
+          Attach the .so to prerelease tag pdfium-skia-linux-x64-chromium-8066.
+        required: true
+        default: false
+        type: boolean
+  pull_request:
+    paths:
+      - .github/workflows/pdfium-skia-linux.yml
+      - etc/pdfium-skia/**
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pdfium-skia-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: linux-x64 shared lib
+    runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk when the runner is tight
+        run: |
+          set -euo pipefail
+          echo "nproc=$(nproc)"
+          free -h
+          df -h /
+          free_kb=$(df -Pk / | awk 'NR==2 {print $4}')
+          if [ "$free_kb" -lt 40000000 ]; then
+            sudo rm -rf \
+              /usr/local/lib/android \
+              /usr/share/dotnet \
+              /usr/local/.ghcup \
+              /opt/ghc \
+              /usr/local/share/boost \
+              /usr/share/swift \
+              /usr/share/miniconda \
+              /opt/hostedtoolcache/CodeQL \
+              || true
+            docker image prune -af || true
+            df -h /
+            free_kb=$(df -Pk / | awk 'NR==2 {print $4}')
+          fi
+          if [ "$free_kb" -lt 25000000 ]; then
+            echo "Less than 25 GB free. Use a larger runner or a self-hosted machine with 40 GB free." >&2
+            exit 1
+          fi
+
+      - name: Build chromium/8066 with Skia and AGG
+        env:
+          INSTALL_BUILD_DEPS: "1"
+          NINJA_JOBS: ${{ inputs.ninja_jobs || '2' }}
+          PDFIUM_SYMBOL_LEVEL: "0"
+          PDFIUM_SKIA_ROOT: ${{ runner.temp }}/pdfium-skia-8066
+        run: bash etc/pdfium-skia/build-linux-x64.sh
+
+      - name: Record checksum and exports
+        env:
+          PDFIUM_SKIA_ROOT: ${{ runner.temp }}/pdfium-skia-8066
+        run: |
+          set -euo pipefail
+          cd "$PDFIUM_SKIA_ROOT"
+          sha256sum libpdfium.so | tee libpdfium.so.sha256
+          nm -D libpdfium.so | grep -E 'FPDF_RenderPageSkia|FPDF_InitLibraryWithConfig|FPDF_RenderPageBitmap' | tee symbols.txt
+          ls -lh libpdfium.so
+
+      - name: Upload libpdfium.so
+        uses: actions/upload-artifact@v4
+        with:
+          name: libpdfium-skia-linux-x64
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/pdfium-skia-8066/libpdfium.so
+            ${{ runner.temp }}/pdfium-skia-8066/libpdfium.so.sha256
+            ${{ runner.temp }}/pdfium-skia-8066/symbols.txt
+
+      - name: Publish prerelease
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PDFIUM_SKIA_ROOT: ${{ runner.temp }}/pdfium-skia-8066
+        run: |
+          set -euo pipefail
+          tag=pdfium-skia-linux-x64-chromium-8066
+          notes='Drop-in linux-x64 libpdfium.so built from PDFium chromium/8066 with pdf_use_skia and pdf_use_agg. V8 and XFA are off. Replace the stock libpdfium.so next to the Native AOT binary, then set PDFTOIMAGE_RENDERER=skia (miniocr: MINIOCR_PDF_RENDERER=skia). This is a CPU bitmap path, not a GPU surface.'
+          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$tag" "$PDFIUM_SKIA_ROOT/libpdfium.so" \
+              --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "$tag" "$PDFIUM_SKIA_ROOT/libpdfium.so" \
+              --repo "${{ github.repository }}" \
+              --prerelease \
+              --title "PDFium Skia linux-x64 (chromium/8066)" \
+              --notes "$notes"
+          fi

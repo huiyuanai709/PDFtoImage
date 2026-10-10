@@ -105,6 +105,10 @@ namespace PDFtoImage.Internals
 
             [LibraryImport("pdfium")]
             [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+            public static partial void FPDF_InitLibraryWithConfig(IntPtr config);
+
+            [LibraryImport("pdfium")]
+            [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
             public static partial void FPDF_DestroyLibrary();
 
             [LibraryImport("pdfium")]
