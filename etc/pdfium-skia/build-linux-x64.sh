@@ -66,7 +66,12 @@ if [[ ! -d "$SOURCE/third_party/skia" ]]; then
 fi
 
 if [[ "${INSTALL_BUILD_DEPS:-0}" == "1" ]]; then
-  "$SOURCE/build/install-build-deps.sh" --no-chromeos-fonts
+  export DEBIAN_FRONTEND=noninteractive
+  deps_args=(--no-chromeos-fonts)
+  if grep -q -- '--no-prompt' "$SOURCE/build/install-build-deps.sh"; then
+    deps_args+=(--no-prompt)
+  fi
+  "$SOURCE/build/install-build-deps.sh" "${deps_args[@]}"
 else
   echo "System packages are not installed by default. If gn or the link fails on missing headers, re-run with INSTALL_BUILD_DEPS=1 (uses sudo)."
 fi
@@ -88,6 +93,18 @@ clang_use_chrome_plugins = false
 pdf_use_skia = true
 pdf_use_agg = true
 EOF
+
+# 0 keeps the link inside a 16 GB GitHub-hosted runner. Unset keeps the GN default.
+if [[ -n "${PDFIUM_SYMBOL_LEVEL:-}" ]]; then
+  case "$PDFIUM_SYMBOL_LEVEL" in
+    0|1|2) ;;
+    *)
+      echo "PDFIUM_SYMBOL_LEVEL must be 0, 1, or 2" >&2
+      exit 1
+      ;;
+  esac
+  printf 'symbol_level = %s\n' "$PDFIUM_SYMBOL_LEVEL" >> "$OUT/args.gn"
+fi
 
 # pdf_is_complete_lib is the fat static archive. It must stay unset here.
 if grep -q 'pdf_is_complete_lib' "$OUT/args.gn"; then
