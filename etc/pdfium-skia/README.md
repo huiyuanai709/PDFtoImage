@@ -40,6 +40,22 @@ The script refuses to finish unless `nm -D` shows `FPDF_RenderPageSkia`, `FPDF_I
 
 `bash etc/pdfium-skia/build-linux-x64.sh --self-test` only checks the source rewrite, and does not download PDFium.
 
+`PDFIUM_SYMBOL_LEVEL=0` writes `symbol_level = 0` into `args.gn`. The GitHub Actions job sets that so the link stays inside 16 GB. The dropped-in file is stripped either way.
+
+## GitHub Actions
+
+`.github/workflows/pdfium-skia-linux.yml` runs this script. It does not run on every push.
+
+Public `ubuntu-24.04` is 4 vCPU and 16 GB RAM. Those machines currently have about 90 GB free on a 150 GB disk. The documented floor is 14 GB, so the job removes preinstalled SDKs when free space is under 40 GB and exits if less than 25 GB remains. A private `ubuntu-latest` is 2 vCPU, 8 GB RAM, and about 14 GB free. That is too small. Do not point this workflow at it.
+
+pdfium-binaries builds linux-x64 without Skia in about 8 minutes. Skia is a large extra compile. Plan on 45–120 minutes, which is inside the 6 hour job limit. Public standard runners are free. An 8-core larger runner (32 GB RAM, 300 GB disk) is about $0.022 per minute and requires GitHub Team or Enterprise; included minutes do not apply, and public repositories are not exempt. A 90 minute run on that runner is about $2. A 16-core runner is $0.042 per minute.
+
+The Actions cache limit is 10 GB, smaller than this checkout, so the source tree is not cached. Cloning `depot_tools` is cheap next to `gclient sync`.
+
+`workflow_dispatch` shows a Run button only after this file is on the default branch. Until then, a pull request that touches `etc/pdfium-skia/**` or this workflow starts the job. The artifact is `libpdfium-skia-linux-x64`: stripped `libpdfium.so`, `libpdfium.so.sha256`, and `symbols.txt`, kept for 14 days. Dispatch with `publish_release` to attach the library to the prerelease tag `pdfium-skia-linux-x64-chromium-8066`.
+
+If the link is killed, run again with the runner input set to a larger-runner label that exists on the account, or a self-hosted runner with 32 GB RAM and 40 GB free disk. Leave the contest GPU machine for OCR.
+
 ## Drop in
 
 Put that `libpdfium.so` next to the Native AOT binary, in place of the stock one. The file name stays `libpdfium.so`, which is what `NativeLibrary.TryLoad("pdfium")` loads. Then set `PDFTOIMAGE_RENDERER=skia` before the first PDF call. Parallel workers are separate processes of the same binary; they load the same directory and inherit the variable.
