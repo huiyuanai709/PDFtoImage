@@ -37,9 +37,14 @@ namespace PDFtoImage.Tests
 
             public void Dispose()
             {
-                // Recursive: workers may leave files under TempDirectory on Windows.
-                if (Directory.Exists(_root))
-                    Directory.Delete(_root, recursive: true);
+                // Best-effort: workers may still hold temp files briefly on Windows.
+                try
+                {
+                    if (Directory.Exists(_root))
+                        Directory.Delete(_root, recursive: true);
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
             }
         }
 
@@ -629,6 +634,8 @@ namespace PDFtoImage.Tests
             var written = File.GetLastWriteTimeUtc(copy);
             var bytes = File.ReadAllBytes(copy);
             bytes[Math.Min(4096, bytes.Length - 1)] ^= 0x22;
+            // RetainDocuments keeps a worker handle open; release before rewriting on Windows.
+            await files.ReleaseRetainedFileAsync(copy, TestContext.CancellationToken);
             File.WriteAllBytes(copy, bytes);
             try
             {
@@ -647,6 +654,7 @@ namespace PDFtoImage.Tests
             using (var image = await files.ToImageAsync(File.OpenRead(copy), leaveOpen: false, options: options, cancellationToken: TestContext.CancellationToken))
                 Assert.IsGreaterThan(0, image.Width);
             Assert.AreSequenceEqual([2], files.WorkerDocumentLoadCounts);
+            await files.ReleaseRetainedFileAsync(copy, TestContext.CancellationToken);
             File.Delete(copy);
             File.Delete(Path.Combine(fixture.TempDirectory, "stamp-a.pdf"));
         }
