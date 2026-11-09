@@ -55,6 +55,62 @@ var needsOcr = analysis.Content.TextObjectsAreInvisible
 
 PDFium calls in a process take one shared lock. Extra threads calling `ToImages` on copies of the same PDF do not render faster, and each call parses the file again. Use one `PdfSession` on a single thread, or [PDFtoImage.Parallel](src/Parallel/README.md) when the work should use several cores. For a large PDF, `ProcessorTransferMode.MemoryMappedFile` keeps one shared file instead of copying the PDF into every worker. Opaque grayscale pages are transferred as 8-bit gray and expanded back to the same BGRA bitmap in the host.
 
+### 1. Stream + page range (primary)
+For local files or any seekable stream you already have. Zero-based page indices; only those pages are rendered.
+
+```csharp
+using var pdf = File.OpenRead("document.pdf");
+
+// First 10 pages
+foreach (var bitmap in PDFtoImage.Conversion.ToImages(pdf, pages: 0..10, leaveOpen: true))
+    bitmap.Dispose();
+
+foreach (var bitmap in PDFtoImage.Conversion.ToImages(pdf, firstPage: 0, pageCount: 10, leaveOpen: true))
+    bitmap.Dispose();
+
+using var session = PDFtoImage.PdfSession.Open(pdf, leaveOpen: true);
+foreach (var bitmap in session.RenderPages(0..10))
+    bitmap.Dispose();
+```
+
+### 2. URL + HTTP Range + page range
+Optional helper: probes head (and tail when not linearized), fetches sparse byte ranges, then renders only the requested pages. Not required when you already have a `Stream`.
+
+```csharp
+var images = await PDFtoImage.PdfHttpByteRangeProvider.ToImagesAsync(
+    new Uri("https://example.com/large.pdf"),
+    pages: 0..10);
+
+foreach (var bitmap in images)
+    bitmap.Dispose();
+
+// Or open a session and render later
+using var session = await PDFtoImage.PdfHttpByteRangeProvider.OpenSessionAsync(
+    "https://example.com/large.pdf");
+foreach (var bitmap in session.RenderPages(firstPage: 0, pageCount: 10))
+    bitmap.Dispose();
+```
+
+### 3. Custom random access (`IPdfRandomAccess`)
+Implement `Read(offset, buffer, …)` yourself (S3, encrypted store, your own HTTP client, …), wrap with `PdfByteRangeStream`, then use the same page-range APIs.
+
+```csharp
+var access = PDFtoImage.PdfRandomAccess.Create(contentLength, (offset, buffer, bufferOffset, count) =>
+{
+    yourClient.ReadRange(offset, count, buffer, bufferOffset);
+});
+
+using var bytes = await PDFtoImage.PdfByteRangeStream.OpenAsync(access);
+using var session = PDFtoImage.PdfSession.Open(bytes, leaveOpen: true);
+foreach (var bitmap in session.RenderPages(0..10))
+    bitmap.Dispose();
+```
+
+#### 中文摘要
+1. **主 API**：`Stream` + 页范围（`0..10` / `firstPage`+`pageCount`）。  
+2. **URL 辅助**：`PdfHttpByteRangeProvider`（HTTP Range + 头/尾探测）并可带页范围。  
+3. **自定义后端**：`IPdfRandomAccess`。
+
 ### Unity project installation
 1. Open your project and navigate to `Window` → `Package Management` → `Package Manager`.
 1. Click on the `+` button (top-left corner) and select `Install package from git URL...`.

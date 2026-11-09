@@ -76,7 +76,9 @@ namespace PDFtoImage
         /// </summary>
         /// <param name="pages">Zero-based page numbers. Invalid pages throw before the first image is produced.</param>
         /// <param name="options">Render options. The default renders at 300 DPI.</param>
+#pragma warning disable RS0027 // Convenience Range/firstPage overloads intentionally omit optional options
         public IEnumerable<SKBitmap> RenderPages(IEnumerable<int> pages, RenderOptions options = default)
+#pragma warning restore RS0027
         {
             ThrowIfDisposed();
 
@@ -90,6 +92,39 @@ namespace PDFtoImage
                 throw new ArgumentOutOfRangeException(nameof(pages), $"The page numbers must be between 0 and {pageCount - 1}. The PDF has {pageCount} pages in total.");
 
             return RenderValidated(validated, options);
+        }
+
+        /// <summary>
+        /// Renders a contiguous page range from the already opened document.
+        /// Only those pages are rendered.
+        /// </summary>
+        /// <param name="pages">Zero-based page range, e.g. <c>0..10</c> for the first ten pages.</param>
+        public IEnumerable<SKBitmap> RenderPages(Range pages)
+        {
+            ThrowIfDisposed();
+
+            var total = _document.PageSizes.Count;
+            var (offset, length) = pages.GetOffsetAndLength(total);
+
+            if (offset < 0 || length < 0 || offset + length > total)
+                throw new ArgumentOutOfRangeException(nameof(pages), $"The page numbers must be between 0 and {total - 1}. The PDF has {total} pages in total.");
+
+            return RenderPages(Enumerable.Range(offset, length));
+        }
+
+        /// <summary>
+        /// Renders <paramref name="pageCount"/> pages starting at zero-based <paramref name="firstPage"/>.
+        /// </summary>
+        /// <param name="firstPage">Zero-based index of the first page to render.</param>
+        /// <param name="pageCount">Number of pages to render.</param>
+        public IEnumerable<SKBitmap> RenderPages(int firstPage, int pageCount)
+        {
+            if (firstPage < 0)
+                throw new ArgumentOutOfRangeException(nameof(firstPage));
+            if (pageCount < 0)
+                throw new ArgumentOutOfRangeException(nameof(pageCount));
+
+            return RenderPages(firstPage..(firstPage + pageCount));
         }
 
         /// <summary>

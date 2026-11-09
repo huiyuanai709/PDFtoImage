@@ -112,6 +112,11 @@
 		<PackageReference Include="SkiaSharp.NativeAssets.Win32" PrivateAssets="analyzers" />
 	</ItemGroup>
 
+	<!-- System.Net.Http is not referenced by default on .NET Framework TFMs -->
+	<ItemGroup Condition="'$(TargetFramework)' == 'net471' or '$(TargetFramework)' == 'net481'">
+		<Reference Include="System.Net.Http" />
+	</ItemGroup>
+
 	<!-- polyfill for .NET Framework -->
 	<ItemGroup Condition="'$(NeedsPolySharp)' == 'true'">
 		<PackageReference Include="PolySharp" PrivateAssets="all" />

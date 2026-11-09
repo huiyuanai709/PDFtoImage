@@ -60,7 +60,9 @@ namespace PDFtoImage
         /// <param name="password">The password for opening the PDF. Use <see langword="null"/> if no password is needed.</param>
         /// <param name="options">Additional options for PDF rendering.</param>
         /// <returns>The rendered PDF pages as images.</returns>
+#pragma warning disable RS0027 // Existing all-pages overload coexists with longer page-filter overloads
         public static IEnumerable<SKBitmap> ToImages(byte[] pdfAsByteArray, string? password = null, RenderOptions options = default)
+#pragma warning restore RS0027
         {
             if (pdfAsByteArray == null)
                 throw new ArgumentNullException(nameof(pdfAsByteArray));
