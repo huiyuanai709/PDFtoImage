@@ -37,10 +37,9 @@ namespace PDFtoImage.Tests
 
             public void Dispose()
             {
-                File.Delete(InputPath);
-                Directory.Delete(TempDirectory);
-                Directory.Delete(Path.GetDirectoryName(TempDirectory)!);
-                Directory.Delete(_root);
+                // Recursive: workers may leave files under TempDirectory on Windows.
+                if (Directory.Exists(_root))
+                    Directory.Delete(_root, recursive: true);
             }
         }
 
