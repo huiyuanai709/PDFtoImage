@@ -40,3 +40,46 @@ PDFtoImage.RenderOptions.NativeGrayscale.init -> void
 PDFtoImage.Resource
 PDFtoImage.Resource.Resource() -> void
 static PDFtoImage.PdfSession.Open(System.IO.Stream! pdfStream, bool leaveOpen = false, string? password = null) -> PDFtoImage.PdfSession!
+PDFtoImage.Exceptions.PdfHttpRangeDownloadLimitException
+PDFtoImage.Exceptions.PdfHttpRangeDownloadLimitException.BytesDownloaded.get -> long
+PDFtoImage.Exceptions.PdfHttpRangeDownloadLimitException.MaxDownloadBytes.get -> long
+PDFtoImage.Exceptions.PdfHttpRangeDownloadLimitException.PdfHttpRangeDownloadLimitException(long maxDownloadBytes, long bytesDownloaded) -> void
+PDFtoImage.Exceptions.PdfHttpRangeException
+PDFtoImage.Exceptions.PdfHttpRangeException.PdfHttpRangeException(string! message) -> void
+PDFtoImage.Exceptions.PdfHttpRangeException.PdfHttpRangeException(string! message, System.Exception! innerException) -> void
+PDFtoImage.PdfHttpRangeOptions
+PDFtoImage.PdfHttpRangeOptions.AllowFullDownloadFallback.get -> bool
+PDFtoImage.PdfHttpRangeOptions.AllowFullDownloadFallback.set -> void
+PDFtoImage.PdfHttpRangeOptions.AlwaysProbeTail.get -> bool
+PDFtoImage.PdfHttpRangeOptions.AlwaysProbeTail.set -> void
+PDFtoImage.PdfHttpRangeOptions.HeadProbeBytes.get -> int
+PDFtoImage.PdfHttpRangeOptions.HeadProbeBytes.set -> void
+PDFtoImage.PdfHttpRangeOptions.MaxDownloadBytes.get -> long?
+PDFtoImage.PdfHttpRangeOptions.MaxDownloadBytes.set -> void
+PDFtoImage.PdfHttpRangeOptions.MinRangeRequestBytes.get -> int
+PDFtoImage.PdfHttpRangeOptions.MinRangeRequestBytes.set -> void
+PDFtoImage.PdfHttpRangeOptions.PdfHttpRangeOptions() -> void
+PDFtoImage.PdfHttpRangeOptions.TailProbeBytes.get -> int
+PDFtoImage.PdfHttpRangeOptions.TailProbeBytes.set -> void
+PDFtoImage.PdfHttpRangeStream
+PDFtoImage.PdfHttpRangeStream.BytesDownloaded.get -> long
+PDFtoImage.PdfHttpRangeStream.IsLinearized.get -> bool?
+PDFtoImage.PdfHttpRangeStream.RangeRequestCount.get -> int
+PDFtoImage.PdfHttpRangeStream.SupportsRange.get -> bool
+PDFtoImage.PdfHttpRangeStream.Uri.get -> System.Uri!
+static PDFtoImage.PdfHttpRangeStream.OpenAsync(System.Uri! uri, System.Net.Http.HttpClient? httpClient = null, PDFtoImage.PdfHttpRangeOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PDFtoImage.PdfHttpRangeStream!>!
+static PDFtoImage.PdfHttpRangeStream.OpenSessionAsync(System.Uri! uri, System.Net.Http.HttpClient? httpClient = null, PDFtoImage.PdfHttpRangeOptions? options = null, string? password = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<PDFtoImage.PdfSession!>!
+override PDFtoImage.PdfHttpRangeStream.CanRead.get -> bool
+override PDFtoImage.PdfHttpRangeStream.CanSeek.get -> bool
+override PDFtoImage.PdfHttpRangeStream.CanWrite.get -> bool
+override PDFtoImage.PdfHttpRangeStream.Flush() -> void
+override PDFtoImage.PdfHttpRangeStream.Length.get -> long
+override PDFtoImage.PdfHttpRangeStream.Position.get -> long
+override PDFtoImage.PdfHttpRangeStream.Position.set -> void
+override PDFtoImage.PdfHttpRangeStream.Read(byte[]! buffer, int offset, int count) -> int
+override PDFtoImage.PdfHttpRangeStream.Seek(long offset, System.IO.SeekOrigin origin) -> long
+override PDFtoImage.PdfHttpRangeStream.SetLength(long value) -> void
+override PDFtoImage.PdfHttpRangeStream.Write(byte[]! buffer, int offset, int count) -> void
+static PDFtoImage.PdfHttpRangeStream.OpenAsync(string! url) -> System.Threading.Tasks.Task<PDFtoImage.PdfHttpRangeStream!>!
+static PDFtoImage.PdfHttpRangeStream.OpenSessionAsync(string! url) -> System.Threading.Tasks.Task<PDFtoImage.PdfSession!>!
+override PDFtoImage.PdfHttpRangeStream.Read(System.Span<byte> buffer) -> int

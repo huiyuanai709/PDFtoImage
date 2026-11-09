@@ -25,6 +25,42 @@ PDFtoImage.Conversion.SavePng(
 
 Dispose returned `SKBitmap` instances after use. To save one, use [`SKBitmap.Encode`](https://learn.microsoft.com/en-us/dotnet/api/skiasharp.skbitmap.encode?view=skiasharp).
 
+### Remote PDFs with HTTP Range (partial download)
+`PdfHttpRangeStream` opens a remote PDF with HTTP Range requests so you can render the first pages of a large file without downloading all of it. The open path probes the **head** (for `%PDF` / `/Linearized`) and, when the file does not look linearized, the **tail** (for `startxref` / trailer). Later PDFium reads fetch only missing byte ranges.
+
+```csharp
+using var remote = await PDFtoImage.PdfHttpRangeStream.OpenAsync(
+    "https://example.com/large.pdf",
+    options: new PDFtoImage.PdfHttpRangeOptions
+    {
+        HeadProbeBytes = 64 * 1024,
+        TailProbeBytes = 256 * 1024,
+        MaxDownloadBytes = 8 * 1024 * 1024, // optional safety cap
+        AllowFullDownloadFallback = true,   // if the server has no Range support
+    });
+
+using var session = PDFtoImage.PdfSession.Open(remote, leaveOpen: true);
+using var page0 = session.Render(0, new PDFtoImage.RenderOptions(Dpi: 144));
+Console.WriteLine($"Downloaded {remote.BytesDownloaded} of {remote.Length} bytes");
+```
+
+Or open a session in one step:
+
+```csharp
+using var session = await PDFtoImage.PdfHttpRangeStream.OpenSessionAsync(
+    new Uri("https://example.com/large.pdf"));
+```
+
+**Notes**
+- The server must expose the PDF over HTTP(S). Range support is detected via `206 Partial Content` / `Accept-Ranges`. Without Range, the stream falls back to a full download unless you set `AllowFullDownloadFallback = false`.
+- Linearization is helpful but not required: non-linearized files still work via head + tail probing and sparse fetches. Some PDFs still touch many middle objects for page 1, so savings vary.
+- Cache-miss reads inside PDFium are synchronous HTTP calls; prefer `OpenAsync` so the initial probes stay async.
+
+#### 远程 PDF 的 HTTP Range（按需下载）
+`PdfHttpRangeStream` 用 HTTP Range 打开远程 PDF，可在不下完整文件的情况下渲染前几页。打开时先探测文件**头部**（`%PDF` / `/Linearized`），若看起来不是线性化 PDF，再探测**尾部**（`startxref` / trailer）；之后 PDFium 读到的缺口再按 Range 补齐。
+
+服务器需支持（或可回退整包下载）HTTP(S)。线性化能省流量，但不是硬门槛。`MaxDownloadBytes` 可限制总下载量。
+
 ### Unity project installation
 1. Open your project and navigate to `Window` → `Package Management` → `Package Manager`.
 1. Click on the `+` button (top-left corner) and select `Install package from git URL...`.
