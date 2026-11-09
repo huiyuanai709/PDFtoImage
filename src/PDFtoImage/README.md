@@ -25,41 +25,61 @@ PDFtoImage.Conversion.SavePng(
 
 Dispose returned `SKBitmap` instances after use. To save one, use [`SKBitmap.Encode`](https://learn.microsoft.com/en-us/dotnet/api/skiasharp.skbitmap.encode?view=skiasharp).
 
-### Remote PDFs with HTTP Range (partial download)
-`PdfHttpRangeStream` opens a remote PDF with HTTP Range requests so you can render the first pages of a large file without downloading all of it. The open path probes the **head** (for `%PDF` / `/Linearized`) and, when the file does not look linearized, the **tail** (for `startxref` / trailer). Later PDFium reads fetch only missing byte ranges.
+### 1. Stream + page range (primary)
+For local files or any seekable stream you already have. Zero-based page indices; only those pages are rendered.
 
 ```csharp
-using var remote = await PDFtoImage.PdfHttpRangeStream.OpenAsync(
-    "https://example.com/large.pdf",
-    options: new PDFtoImage.PdfHttpRangeOptions
-    {
-        HeadProbeBytes = 64 * 1024,
-        TailProbeBytes = 256 * 1024,
-        MaxDownloadBytes = 8 * 1024 * 1024, // optional safety cap
-        AllowFullDownloadFallback = true,   // if the server has no Range support
-    });
+using var pdf = File.OpenRead("document.pdf");
 
-using var session = PDFtoImage.PdfSession.Open(remote, leaveOpen: true);
-using var page0 = session.Render(0, new PDFtoImage.RenderOptions(Dpi: 144));
-Console.WriteLine($"Downloaded {remote.BytesDownloaded} of {remote.Length} bytes");
+// First 10 pages
+foreach (var bitmap in PDFtoImage.Conversion.ToImages(pdf, pages: 0..10, leaveOpen: true))
+    bitmap.Dispose();
+
+foreach (var bitmap in PDFtoImage.Conversion.ToImages(pdf, firstPage: 0, pageCount: 10, leaveOpen: true))
+    bitmap.Dispose();
+
+using var session = PDFtoImage.PdfSession.Open(pdf, leaveOpen: true);
+foreach (var bitmap in session.RenderPages(0..10))
+    bitmap.Dispose();
 ```
 
-Or open a session in one step:
+### 2. URL + HTTP Range + page range
+Optional helper: probes head (and tail when not linearized), fetches sparse byte ranges, then renders only the requested pages. Not required when you already have a `Stream`.
 
 ```csharp
-using var session = await PDFtoImage.PdfHttpRangeStream.OpenSessionAsync(
-    new Uri("https://example.com/large.pdf"));
+var images = await PDFtoImage.PdfHttpByteRangeProvider.ToImagesAsync(
+    new Uri("https://example.com/large.pdf"),
+    pages: 0..10);
+
+foreach (var bitmap in images)
+    bitmap.Dispose();
+
+// Or open a session and render later
+using var session = await PDFtoImage.PdfHttpByteRangeProvider.OpenSessionAsync(
+    "https://example.com/large.pdf");
+foreach (var bitmap in session.RenderPages(firstPage: 0, pageCount: 10))
+    bitmap.Dispose();
 ```
 
-**Notes**
-- The server must expose the PDF over HTTP(S). Range support is detected via `206 Partial Content` / `Accept-Ranges`. Without Range, the stream falls back to a full download unless you set `AllowFullDownloadFallback = false`.
-- Linearization is helpful but not required: non-linearized files still work via head + tail probing and sparse fetches. Some PDFs still touch many middle objects for page 1, so savings vary.
-- Cache-miss reads inside PDFium are synchronous HTTP calls; prefer `OpenAsync` so the initial probes stay async.
+### 3. Custom random access (`IPdfRandomAccess`)
+Implement `Read(offset, buffer, …)` yourself (S3, encrypted store, your own HTTP client, …), wrap with `PdfByteRangeStream`, then use the same page-range APIs.
 
-#### 远程 PDF 的 HTTP Range（按需下载）
-`PdfHttpRangeStream` 用 HTTP Range 打开远程 PDF，可在不下完整文件的情况下渲染前几页。打开时先探测文件**头部**（`%PDF` / `/Linearized`），若看起来不是线性化 PDF，再探测**尾部**（`startxref` / trailer）；之后 PDFium 读到的缺口再按 Range 补齐。
+```csharp
+var access = PDFtoImage.PdfRandomAccess.Create(contentLength, (offset, buffer, bufferOffset, count) =>
+{
+    yourClient.ReadRange(offset, count, buffer, bufferOffset);
+});
 
-服务器需支持（或可回退整包下载）HTTP(S)。线性化能省流量，但不是硬门槛。`MaxDownloadBytes` 可限制总下载量。
+using var bytes = await PDFtoImage.PdfByteRangeStream.OpenAsync(access);
+using var session = PDFtoImage.PdfSession.Open(bytes, leaveOpen: true);
+foreach (var bitmap in session.RenderPages(0..10))
+    bitmap.Dispose();
+```
+
+#### 中文摘要
+1. **主 API**：`Stream` + 页范围（`0..10` / `firstPage`+`pageCount`）。  
+2. **URL 辅助**：`PdfHttpByteRangeProvider`（HTTP Range + 头/尾探测）并可带页范围。  
+3. **自定义后端**：`IPdfRandomAccess`。
 
 ### Unity project installation
 1. Open your project and navigate to `Window` → `Package Management` → `Package Manager`.

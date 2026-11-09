@@ -276,6 +276,31 @@ namespace PDFtoImage
             }
         }
 
+        /// <summary>
+        /// Renders a contiguous page range of a PDF into images.
+        /// Only the requested pages are rendered (zero-based <paramref name="firstPage"/>, <paramref name="pageCount"/> pages).
+        /// </summary>
+        /// <param name="pdfStream">The PDF as a stream.</param>
+        /// <param name="firstPage">Zero-based index of the first page to render.</param>
+        /// <param name="pageCount">Number of pages to render.</param>
+        /// <param name="leaveOpen"><see langword="true"/> to leave the <paramref name="pdfStream"/> open after the PDF document is loaded; otherwise, <see langword="false"/>.</param>
+        /// <param name="password">The password for opening the PDF. Use <see langword="null"/> if no password is needed.</param>
+        /// <param name="options">Additional options for PDF rendering.</param>
+        /// <returns>The rendered PDF pages as images.</returns>
+        /// <summary>
+        /// Renders a contiguous page range of a PDF into images.
+        /// Only the requested pages are rendered (zero-based <paramref name="firstPage"/>, <paramref name="pageCount"/> pages).
+        /// </summary>
+        public static IEnumerable<SKBitmap> ToImages(Stream pdfStream, int firstPage, int pageCount)
+        {
+            if (firstPage < 0)
+                throw new ArgumentOutOfRangeException(nameof(firstPage));
+            if (pageCount < 0)
+                throw new ArgumentOutOfRangeException(nameof(pageCount));
+
+            return ToImages(pdfStream, firstPage..(firstPage + pageCount));
+        }
+
 #if NET6_0_OR_GREATER
         /// <summary>
         /// Renders a range of pages of a given PDF into images.

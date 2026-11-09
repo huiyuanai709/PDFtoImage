@@ -93,6 +93,37 @@ namespace PDFtoImage
         }
 
         /// <summary>
+        /// Renders a contiguous page range from the already opened document.
+        /// Only those pages are rendered.
+        /// </summary>
+        /// <param name="pages">Zero-based page range, e.g. <c>0..10</c> for the first ten pages.</param>
+        public IEnumerable<SKBitmap> RenderPages(Range pages)
+        {
+            ThrowIfDisposed();
+
+            var total = _document.PageSizes.Count;
+            var (offset, length) = pages.GetOffsetAndLength(total);
+
+            if (offset < 0 || length < 0 || offset + length > total)
+                throw new ArgumentOutOfRangeException(nameof(pages), $"The page numbers must be between 0 and {total - 1}. The PDF has {total} pages in total.");
+
+            return RenderPages(Enumerable.Range(offset, length));
+        }
+
+        /// <summary>
+        /// Renders <paramref name="pageCount"/> pages starting at zero-based <paramref name="firstPage"/>.
+        /// </summary>
+        public IEnumerable<SKBitmap> RenderPages(int firstPage, int pageCount)
+        {
+            if (firstPage < 0)
+                throw new ArgumentOutOfRangeException(nameof(firstPage));
+            if (pageCount < 0)
+                throw new ArgumentOutOfRangeException(nameof(pageCount));
+
+            return RenderPages(firstPage..(firstPage + pageCount));
+        }
+
+        /// <summary>
         /// Renders one page into a packed pixel buffer.
         /// <see cref="RenderOptions.Grayscale"/> without <see cref="RenderOptions.UseTiling"/> produces 8-bit gray
         /// (<see cref="SKColorType.Gray8"/>). Without <see cref="RenderOptions.NativeGrayscale"/>, each gray byte is the

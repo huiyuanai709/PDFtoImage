@@ -12,137 +12,170 @@ using System.Threading.Tasks;
 namespace PDFtoImage.Tests
 {
     [TestClass]
-    public class HttpRangeTests : TestBase
+    public class ByteRangeTests : TestBase
     {
         [TestMethod]
-        public async Task OpenNonLinearizedPdfRendersWithoutFullDownload()
+        public async Task ProviderCallbackRendersWithoutFullFetch()
         {
             var pdfBytes = ReadAsset("Wikimedia_Commons_web.pdf");
-            Assert.IsGreaterThan(1_000_000, pdfBytes.Length, "Fixture should be large enough to show partial download.");
+            Assert.IsGreaterThan(1_000_000, pdfBytes.Length);
 
-            using var server = RangeTestServer.Start(pdfBytes, supportRange: true);
-            using var stream = await PdfHttpRangeStream.OpenAsync(server.Uri, options: new PdfHttpRangeOptions
+            var fetches = new List<(long Offset, int Count)>();
+            var provider = PdfRandomAccess.Create(pdfBytes.Length, (offset, buffer, bufferOffset, count) =>
+            {
+                lock (fetches)
+                    fetches.Add((offset, count));
+                Buffer.BlockCopy(pdfBytes, (int)offset, buffer, bufferOffset, count);
+            });
+
+            using var stream = await PdfByteRangeStream.OpenAsync(provider, new PdfByteRangeOptions
             {
                 HeadProbeBytes = 64 * 1024,
                 TailProbeBytes = 256 * 1024,
                 MinRangeRequestBytes = 64 * 1024,
             });
 
-            Assert.IsTrue(stream.SupportsRange);
             Assert.AreEqual(false, stream.IsLinearized);
-            Assert.IsLessThan(pdfBytes.Length, stream.BytesDownloaded);
-
-            using var session = PdfSession.Open(stream, leaveOpen: true);
-            Assert.IsGreaterThan(0, session.PageCount);
-
-            using var bitmap = session.Render(0, new RenderOptions(Dpi: 72));
-            Assert.IsGreaterThan(0, bitmap.ByteCount);
-
-            Assert.IsLessThan(pdfBytes.Length, stream.BytesDownloaded,
-                $"Expected a partial download, but got {stream.BytesDownloaded} of {pdfBytes.Length} bytes.");
-            Assert.IsGreaterThan(0, stream.RangeRequestCount);
-            Assert.IsTrue(server.RangeRequestCount >= 1);
-        }
-
-        [TestMethod]
-        public async Task OpenLinearizedPdfDetectsLinearizedFlag()
-        {
-            var pdfBytes = ReadAsset("hundesteuer-anmeldung.pdf");
-            using var server = RangeTestServer.Start(pdfBytes, supportRange: true);
-            using var stream = await PdfHttpRangeStream.OpenAsync(server.Uri, options: new PdfHttpRangeOptions
-            {
-                HeadProbeBytes = 64 * 1024,
-                TailProbeBytes = 64 * 1024,
-            });
-
-            Assert.IsTrue(stream.SupportsRange);
-            Assert.AreEqual(true, stream.IsLinearized);
-            Assert.IsLessThan(pdfBytes.Length, stream.BytesDownloaded,
-                "A linearized open should only need the head probe before rendering.");
+            Assert.IsLessThan(pdfBytes.Length, stream.BytesFetched);
 
             using var session = PdfSession.Open(stream, leaveOpen: true);
             using var bitmap = session.Render(0, new RenderOptions(Dpi: 72));
             Assert.IsGreaterThan(0, bitmap.ByteCount);
+            Assert.IsLessThan(pdfBytes.Length, stream.BytesFetched);
+            Assert.IsTrue(fetches.Count >= 2);
+            Assert.IsTrue(fetches.Any(f => f.Offset == 0));
         }
 
         [TestMethod]
-        public async Task OpenSessionAsyncConvenienceWorks()
+        public async Task FromStreamProviderWorks()
         {
             var pdfBytes = ReadAsset("SocialPreview.pdf");
-            using var server = RangeTestServer.Start(pdfBytes, supportRange: true);
+            using var memory = new MemoryStream(pdfBytes, writable: false);
+            var provider = PdfRandomAccess.FromStream(memory, leaveOpen: true);
 
-            using var session = await PdfHttpRangeStream.OpenSessionAsync(server.Uri);
-            Assert.AreEqual(1, session.PageCount);
-            using var bitmap = session.Render(0, new RenderOptions(Dpi: 72));
-            Assert.IsGreaterThan(0, bitmap.ByteCount);
-        }
-
-        [TestMethod]
-        public async Task FullDownloadFallbackWhenRangeUnsupported()
-        {
-            var pdfBytes = ReadAsset("SocialPreview.pdf");
-            using var server = RangeTestServer.Start(pdfBytes, supportRange: false);
-            using var stream = await PdfHttpRangeStream.OpenAsync(server.Uri, options: new PdfHttpRangeOptions
-            {
-                AllowFullDownloadFallback = true,
-            });
-
-            Assert.IsFalse(stream.SupportsRange);
-            Assert.AreEqual(pdfBytes.Length, stream.BytesDownloaded);
-
-            using var session = PdfSession.Open(stream, leaveOpen: true);
-            Assert.AreEqual(1, session.PageCount);
-        }
-
-        [TestMethod]
-        public async Task DisallowFallbackThrowsWhenRangeUnsupported()
-        {
-            var pdfBytes = ReadAsset("SocialPreview.pdf");
-            using var server = RangeTestServer.Start(pdfBytes, supportRange: false);
-
-            await Assert.ThrowsExactlyAsync<PdfHttpRangeException>(async () =>
-            {
-                _ = await PdfHttpRangeStream.OpenAsync(server.Uri, options: new PdfHttpRangeOptions
-                {
-                    AllowFullDownloadFallback = false,
-                });
-            });
-        }
-
-        [TestMethod]
-        public async Task MaxDownloadBytesIsEnforced()
-        {
-            var pdfBytes = ReadAsset("Wikimedia_Commons_web.pdf");
-            using var server = RangeTestServer.Start(pdfBytes, supportRange: true);
-
-            await Assert.ThrowsExactlyAsync<PdfHttpRangeDownloadLimitException>(async () =>
-            {
-                _ = await PdfHttpRangeStream.OpenAsync(server.Uri, options: new PdfHttpRangeOptions
-                {
-                    HeadProbeBytes = 64 * 1024,
-                    TailProbeBytes = 256 * 1024,
-                    MaxDownloadBytes = 8 * 1024,
-                });
-            });
-        }
-
-        [TestMethod]
-        public async Task HeadThenTailProbeOrderForNonLinearized()
-        {
-            var pdfBytes = ReadAsset("SocialPreview.pdf");
-            using var server = RangeTestServer.Start(pdfBytes, supportRange: true);
-            using var stream = await PdfHttpRangeStream.OpenAsync(server.Uri, options: new PdfHttpRangeOptions
+            using var stream = await PdfByteRangeStream.OpenAsync(provider, new PdfByteRangeOptions
             {
                 HeadProbeBytes = 4096,
                 TailProbeBytes = 4096,
                 MinRangeRequestBytes = 4096,
             });
 
-            Assert.AreEqual(false, stream.IsLinearized);
-            Assert.IsTrue(stream.RangeRequestCount >= 2);
-            Assert.IsTrue(server.RequestedRanges.Any(r => r.From == 0), "Expected a head probe starting at byte 0.");
-            Assert.IsTrue(server.RequestedRanges.Any(r => r.From > 0 || r.To >= pdfBytes.Length - 1),
-                "Expected a tail (or additional) range after the head probe.");
+            using var session = PdfSession.Open(stream, leaveOpen: true);
+            Assert.AreEqual(1, session.PageCount);
+        }
+
+        [TestMethod]
+        public async Task LinearizedHeadProbeOnlyBeforeRender()
+        {
+            var pdfBytes = ReadAsset("hundesteuer-anmeldung.pdf");
+            var provider = PdfRandomAccess.Create(pdfBytes.Length, (offset, buffer, bufferOffset, count) =>
+                Buffer.BlockCopy(pdfBytes, (int)offset, buffer, bufferOffset, count));
+
+            using var stream = await PdfByteRangeStream.OpenAsync(provider, new PdfByteRangeOptions
+            {
+                HeadProbeBytes = 64 * 1024,
+                TailProbeBytes = 64 * 1024,
+            });
+
+            Assert.AreEqual(true, stream.IsLinearized);
+            Assert.IsLessThan(pdfBytes.Length, stream.BytesFetched);
+
+            using var session = PdfSession.Open(stream, leaveOpen: true);
+            using var bitmap = session.Render(0, new RenderOptions(Dpi: 72));
+            Assert.IsGreaterThan(0, bitmap.ByteCount);
+        }
+
+        [TestMethod]
+        public async Task MaxFetchBytesIsEnforced()
+        {
+            var pdfBytes = ReadAsset("Wikimedia_Commons_web.pdf");
+            var provider = PdfRandomAccess.Create(pdfBytes.Length, (offset, buffer, bufferOffset, count) =>
+                Buffer.BlockCopy(pdfBytes, (int)offset, buffer, bufferOffset, count));
+
+            await Assert.ThrowsExactlyAsync<PdfByteRangeFetchLimitException>(async () =>
+            {
+                _ = await PdfByteRangeStream.OpenAsync(provider, new PdfByteRangeOptions
+                {
+                    HeadProbeBytes = 64 * 1024,
+                    TailProbeBytes = 256 * 1024,
+                    MaxFetchBytes = 8 * 1024,
+                });
+            });
+        }
+
+        [TestMethod]
+        public async Task OpenSessionAsyncConvenienceWorks()
+        {
+            var pdfBytes = ReadAsset("SocialPreview.pdf");
+            var provider = PdfRandomAccess.Create(pdfBytes.Length, (offset, buffer, bufferOffset, count) =>
+                Buffer.BlockCopy(pdfBytes, (int)offset, buffer, bufferOffset, count));
+
+            using var session = await PdfByteRangeStream.OpenSessionAsync(provider);
+            Assert.AreEqual(1, session.PageCount);
+        }
+
+        [TestMethod]
+        public async Task HttpAdapterOptionalPathStillWorks()
+        {
+            var pdfBytes = ReadAsset("SocialPreview.pdf");
+            using var server = RangeTestServer.Start(pdfBytes, supportRange: true);
+
+            using var stream = await PdfHttpByteRangeProvider.OpenStreamAsync(server.Uri, rangeOptions: new PdfByteRangeOptions
+            {
+                HeadProbeBytes = 4096,
+                TailProbeBytes = 4096,
+                MinRangeRequestBytes = 4096,
+            });
+
+            Assert.IsTrue(stream.Provider is PdfHttpByteRangeProvider http && http.SupportsRange);
+            using var session = PdfSession.Open(stream, leaveOpen: true);
+            Assert.AreEqual(1, session.PageCount);
+        }
+
+        [TestMethod]
+        public async Task HttpFallbackWhenRangeUnsupported()
+        {
+            var pdfBytes = ReadAsset("SocialPreview.pdf");
+            using var server = RangeTestServer.Start(pdfBytes, supportRange: false);
+
+            using var provider = await PdfHttpByteRangeProvider.CreateAsync(server.Uri, allowFullDownloadFallback: true);
+            Assert.IsFalse(provider.SupportsRange);
+
+            using var stream = await PdfByteRangeStream.OpenAsync(provider);
+            using var session = PdfSession.Open(stream, leaveOpen: true);
+            Assert.AreEqual(1, session.PageCount);
+        }
+
+        [TestMethod]
+        public async Task HttpDisallowFallbackThrows()
+        {
+            var pdfBytes = ReadAsset("SocialPreview.pdf");
+            using var server = RangeTestServer.Start(pdfBytes, supportRange: false);
+
+            await Assert.ThrowsExactlyAsync<PdfHttpRangeException>(async () =>
+            {
+                _ = await PdfHttpByteRangeProvider.CreateAsync(server.Uri, allowFullDownloadFallback: false);
+            });
+        }
+
+
+        [TestMethod]
+        public async Task HttpToImagesAsync_UsesPageRange()
+        {
+            var pdfBytes = ReadAsset("hundesteuer-anmeldung.pdf");
+            using var server = RangeTestServer.Start(pdfBytes, supportRange: true);
+
+            var images = await PdfHttpByteRangeProvider.ToImagesAsync(server.Uri, pages: 0..1);
+            try
+            {
+                Assert.AreEqual(1, images.Count);
+                Assert.IsGreaterThan(0, images[0].ByteCount);
+            }
+            finally
+            {
+                foreach (var image in images)
+                    image.Dispose();
+            }
         }
 
         private static byte[] ReadAsset(string fileName)
@@ -160,8 +193,6 @@ namespace PDFtoImage.Tests
             private readonly bool _supportRange;
             private readonly CancellationTokenSource _cts = new();
             private readonly Task _loop;
-            private readonly List<RangeRequest> _ranges = new();
-            private readonly object _gate = new();
 
             private RangeTestServer(HttpListener listener, Uri uri, byte[] pdf, bool supportRange, Task loop)
             {
@@ -174,27 +205,15 @@ namespace PDFtoImage.Tests
 
             public Uri Uri { get; }
 
-            public int RangeRequestCount
-            {
-                get { lock (_gate) return _ranges.Count; }
-            }
-
-            public IReadOnlyList<RangeRequest> RequestedRanges
-            {
-                get { lock (_gate) return _ranges.ToList(); }
-            }
-
             public static RangeTestServer Start(byte[] pdf, bool supportRange)
             {
                 Exception? last = null;
-
                 for (var attempt = 0; attempt < 12; attempt++)
                 {
                     var port = GetFreePort();
                     var prefix = $"http://127.0.0.1:{port}/";
                     var listener = new HttpListener();
                     listener.Prefixes.Add(prefix);
-
                     try
                     {
                         listener.Start();
@@ -232,23 +251,11 @@ namespace PDFtoImage.Tests
                         {
                             context = await listener.GetContextAsync().ConfigureAwait(false);
                         }
-                        catch (ObjectDisposedException)
-                        {
-                            break;
-                        }
-                        catch (HttpListenerException)
-                        {
-                            break;
-                        }
+                        catch (ObjectDisposedException) { break; }
+                        catch (HttpListenerException) { break; }
 
-                        try
-                        {
-                            local.Handle(context);
-                        }
-                        catch
-                        {
-                            try { context.Response.Abort(); } catch { /* ignore */ }
-                        }
+                        try { local.Handle(context); }
+                        catch { try { context.Response.Abort(); } catch { /* ignore */ } }
                     }
                 });
 
@@ -287,20 +294,14 @@ namespace PDFtoImage.Tests
                     if (parts.Length == 2 && long.TryParse(parts[0], out var from))
                     {
                         long to = parts[1].Length == 0 ? _pdf.Length - 1 : long.Parse(parts[1]);
-                        if (from < 0)
-                            from = 0;
-                        if (to >= _pdf.Length)
-                            to = _pdf.Length - 1;
-
+                        if (from < 0) from = 0;
+                        if (to >= _pdf.Length) to = _pdf.Length - 1;
                         if (from > to)
                         {
                             response.StatusCode = 416;
                             response.Close();
                             return;
                         }
-
-                        lock (_gate)
-                            _ranges.Add(new RangeRequest(from, to));
 
                         var length = (int)(to - from + 1);
                         response.StatusCode = 206;
@@ -334,18 +335,6 @@ namespace PDFtoImage.Tests
                 var port = ((IPEndPoint)listener.LocalEndpoint).Port;
                 listener.Stop();
                 return port;
-            }
-
-            public readonly struct RangeRequest
-            {
-                public RangeRequest(long from, long to)
-                {
-                    From = from;
-                    To = to;
-                }
-
-                public long From { get; }
-                public long To { get; }
             }
         }
     }
