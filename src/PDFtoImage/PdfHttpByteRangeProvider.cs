@@ -67,12 +67,12 @@ namespace PDFtoImage
                 throw new ArgumentException("The URI must be an absolute http or https URL.", nameof(uri));
 
             var ownsClient = httpClient == null;
-            httpClient ??= CreateDefaultClient();
+            var client = httpClient ?? CreateDefaultClient();
 
             try
             {
-                var (length, supportsRange) = await ProbeLengthAsync(httpClient, uri, cancellationToken).ConfigureAwait(false);
-                var provider = new PdfHttpByteRangeProvider(httpClient, ownsClient, uri, length, supportsRange);
+                var (length, supportsRange) = await ProbeLengthAsync(client, uri, cancellationToken).ConfigureAwait(false);
+                var provider = new PdfHttpByteRangeProvider(client, ownsClient, uri, length, supportsRange);
 
                 if (!supportsRange)
                 {
@@ -87,7 +87,7 @@ namespace PDFtoImage
             catch
             {
                 if (ownsClient)
-                    httpClient.Dispose();
+                    client.Dispose();
                 throw;
             }
         }
@@ -228,11 +228,8 @@ namespace PDFtoImage
             using var request = new HttpRequestMessage(HttpMethod.Get, _uri);
             request.Headers.Range = new RangeHeaderValue(offset, offset + count - 1);
 
-#if NET5_0_OR_GREATER
-            using var response = _httpClient.Send(request, HttpCompletionOption.ResponseContentRead);
-#else
+            // Prefer SendAsync+GetResult: HttpClient.Send is unsupported on Android/iOS/MacCatalyst/browser (CA1416).
             using var response = _httpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead).GetAwaiter().GetResult();
-#endif
             if (response.StatusCode != System.Net.HttpStatusCode.PartialContent &&
                 response.StatusCode != System.Net.HttpStatusCode.OK)
             {

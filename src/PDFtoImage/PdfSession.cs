@@ -76,7 +76,9 @@ namespace PDFtoImage
         /// </summary>
         /// <param name="pages">Zero-based page numbers. Invalid pages throw before the first image is produced.</param>
         /// <param name="options">Render options. The default renders at 300 DPI.</param>
+#pragma warning disable RS0027 // Convenience Range/firstPage overloads intentionally omit optional options
         public IEnumerable<SKBitmap> RenderPages(IEnumerable<int> pages, RenderOptions options = default)
+#pragma warning restore RS0027
         {
             ThrowIfDisposed();
 
@@ -113,6 +115,8 @@ namespace PDFtoImage
         /// <summary>
         /// Renders <paramref name="pageCount"/> pages starting at zero-based <paramref name="firstPage"/>.
         /// </summary>
+        /// <param name="firstPage">Zero-based index of the first page to render.</param>
+        /// <param name="pageCount">Number of pages to render.</param>
         public IEnumerable<SKBitmap> RenderPages(int firstPage, int pageCount)
         {
             if (firstPage < 0)

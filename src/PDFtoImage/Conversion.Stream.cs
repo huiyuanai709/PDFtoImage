@@ -283,14 +283,11 @@ namespace PDFtoImage
         /// <param name="pdfStream">The PDF as a stream.</param>
         /// <param name="firstPage">Zero-based index of the first page to render.</param>
         /// <param name="pageCount">Number of pages to render.</param>
-        /// <param name="leaveOpen"><see langword="true"/> to leave the <paramref name="pdfStream"/> open after the PDF document is loaded; otherwise, <see langword="false"/>.</param>
-        /// <param name="password">The password for opening the PDF. Use <see langword="null"/> if no password is needed.</param>
-        /// <param name="options">Additional options for PDF rendering.</param>
         /// <returns>The rendered PDF pages as images.</returns>
-        /// <summary>
-        /// Renders a contiguous page range of a PDF into images.
-        /// Only the requested pages are rendered (zero-based <paramref name="firstPage"/>, <paramref name="pageCount"/> pages).
-        /// </summary>
+        /// <remarks>
+        /// For <c>leaveOpen</c>, password, or custom <see cref="RenderOptions"/>, use
+        /// <see cref="ToImages(Stream, Range, bool, string?, RenderOptions)"/> with an explicit <see cref="Range"/>.
+        /// </remarks>
         public static IEnumerable<SKBitmap> ToImages(Stream pdfStream, int firstPage, int pageCount)
         {
             if (firstPage < 0)

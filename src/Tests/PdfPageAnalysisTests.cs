@@ -172,7 +172,7 @@ namespace PDFtoImage.Tests
                 Write(output, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> /Contents " + contentIds[i] + " 0 R >>\nendobj\n");
                 StartObject(output, offsets, contentIds[i]);
                 Write(output, "<< /Length " + content.Length + " >>\nstream\n");
-                output.Write(content);
+                Write(output, content);
                 Write(output, "\nendstream\nendobj\n");
             }
 
@@ -215,12 +215,12 @@ namespace PDFtoImage.Tests
 
             StartObject(output, offsets, 4);
             Write(output, "<< /Length " + contentBytes.Length + " >>\nstream\n");
-            output.Write(contentBytes);
+            Write(output, contentBytes);
             Write(output, "\nendstream\nendobj\n");
 
             StartObject(output, offsets, 5);
             Write(output, "<< /Type /XObject /Subtype /Image /Width 64 /Height 80 /ColorSpace " + colorSpace + " /BitsPerComponent 8 /Filter /DCTDecode /Length " + jpeg.Length + " >>\nstream\n");
-            output.Write(jpeg);
+            Write(output, jpeg);
             Write(output, "\nendstream\nendobj\n");
 
             FinishPdf(output, offsets);
@@ -247,15 +247,15 @@ namespace PDFtoImage.Tests
             Write(output, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Fm0 5 0 R >> >> /Contents 4 0 R >>\nendobj\n");
             StartObject(output, offsets, 4);
             Write(output, "<< /Length " + pageContent.Length + " >>\nstream\n");
-            output.Write(pageContent);
+            Write(output, pageContent);
             Write(output, "\nendstream\nendobj\n");
             StartObject(output, offsets, 5);
             Write(output, "<< /Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << /XObject << /Im0 6 0 R >> >> /Length " + formContent.Length + " >>\nstream\n");
-            output.Write(formContent);
+            Write(output, formContent);
             Write(output, "\nendstream\nendobj\n");
             StartObject(output, offsets, 6);
             Write(output, "<< /Type /XObject /Subtype /Image /Width 32 /Height 32 /ColorSpace " + colorSpace + " /BitsPerComponent 8 /Filter /DCTDecode /Length " + jpeg.Length + " >>\nstream\n");
-            output.Write(jpeg);
+            Write(output, jpeg);
             Write(output, "\nendstream\nendobj\n");
 
             FinishPdf(output, offsets);
@@ -297,7 +297,7 @@ namespace PDFtoImage.Tests
             Write(output, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\nendobj\n");
             StartObject(output, offsets, 4);
             Write(output, "<< /Length " + content.Length + " >>\nstream\n");
-            output.Write(content);
+            Write(output, content);
             Write(output, "\nendstream\nendobj\n");
             StartObject(output, offsets, 5);
             Write(output, "<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /Identity-H /DescendantFonts [6 0 R] /ToUnicode 7 0 R >>\nendobj\n");
@@ -305,7 +305,7 @@ namespace PDFtoImage.Tests
             Write(output, "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor 8 0 R /DW 1000 /CIDToGIDMap /Identity >>\nendobj\n");
             StartObject(output, offsets, 7);
             Write(output, "<< /Length " + cmapBytes.Length + " >>\nstream\n");
-            output.Write(cmapBytes);
+            Write(output, cmapBytes);
             Write(output, "\nendstream\nendobj\n");
             StartObject(output, offsets, 8);
             Write(output, "<< /Type /FontDescriptor /FontName /STSong-Light /Flags 4 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 >>\nendobj\n");
@@ -363,7 +363,12 @@ namespace PDFtoImage.Tests
         private static void Write(Stream output, string value)
         {
             var bytes = Encoding.ASCII.GetBytes(value);
-            output.Write(bytes);
+            Write(output, bytes);
+        }
+
+        private static void Write(Stream output, byte[] bytes)
+        {
+            output.Write(bytes, 0, bytes.Length);
         }
     }
 }
