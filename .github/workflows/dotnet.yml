@@ -85,10 +85,9 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 11.x
-          dotnet-quality: 'preview'
       - name: Setup .NET workloads
         run: >
-          dotnet workload install --include-previews
+          dotnet workload install
           maui-android
           maui-ios
           maui-maccatalyst
@@ -135,10 +134,9 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 11.x
-          dotnet-quality: 'preview'
       - name: Setup .NET workloads
         run: >
-          dotnet workload install --include-previews
+          dotnet workload install
           maui-android
           maui-ios
           maui-maccatalyst
@@ -173,10 +171,9 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 11.x
-          dotnet-quality: 'preview'
       - name: Setup .NET workloads
         run: >
-          dotnet workload install --include-previews
+          dotnet workload install
           maui-android
           maui-ios
           maui-maccatalyst
@@ -253,10 +250,9 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 11.x
-          dotnet-quality: 'preview'
       - name: Setup .NET workloads
         run: >
-          dotnet workload install --include-previews
+          dotnet workload install
           maui-android
           maui-ios
           maui-maccatalyst
@@ -320,7 +316,6 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 11.x
-          dotnet-quality: 'preview'
       - name: Build .NET Framework test assemblies
         if: runner.os == 'Windows'
         run: |
@@ -526,7 +521,6 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 11.x
-          dotnet-quality: preview
       - name: Publish Native AOT (win-x64)
         if: success() || failure()
         run: |
@@ -601,7 +595,6 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 11.x
-          dotnet-quality: 'preview'
       - name: Disable .NET problem matcher (no annotations)
         run: echo "::remove-matcher owner=csc::"
       - name: Setup dotnet-coverage
