@@ -22,8 +22,8 @@ namespace PDFtoImage
     [System.Runtime.Versioning.SupportedOSPlatform("Windows")]
     [System.Runtime.Versioning.SupportedOSPlatform("Linux")]
     [System.Runtime.Versioning.SupportedOSPlatform("macOS")]
-    [System.Runtime.Versioning.SupportedOSPlatform("iOS13.6")]
-    [System.Runtime.Versioning.SupportedOSPlatform("MacCatalyst13.5")]
+    [System.Runtime.Versioning.SupportedOSPlatform("iOS17.4")]
+    [System.Runtime.Versioning.SupportedOSPlatform("MacCatalyst17.4")]
     [System.Runtime.Versioning.SupportedOSPlatform("Android31.0")]
     [System.Runtime.Versioning.SupportedOSPlatform("browser")]
 #endif

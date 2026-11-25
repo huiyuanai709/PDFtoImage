@@ -12,6 +12,11 @@ namespace PDFtoImage.Internals
         // threads, even when there are multiple AppDomain's in play.
         private static readonly string LockString = string.Intern("e362349b-001d-4cb2-bf55-a71606a3e36f");
 
+        /// <summary>
+        /// The size of the rented buffer used for reading from streams.
+        /// </summary>
+        internal const int RentedBufferSize = 64 * 1024;
+
         public static void InitLibrary()
         {
             lock (LockString)
@@ -131,13 +136,13 @@ namespace PDFtoImage.Internals
             return _downloadHintsPtr;
         }
 
-        private static IntPtr AllocateAvailabilityStruct<T>(T value) where T : struct
+        private static unsafe IntPtr AllocateAvailabilityStruct<T>(T value) where T : unmanaged
         {
-            var ptr = Marshal.AllocHGlobal(Marshal.SizeOf<T>());
+            var ptr = Marshal.AllocHGlobal(sizeof(T));
 
             try
             {
-                Marshal.StructureToPtr(value, ptr, false);
+                *(T*)ptr = value;
                 return ptr;
             }
             catch
@@ -214,7 +219,8 @@ namespace PDFtoImage.Internals
             lock (LockString)
             {
                 var page = Imports.FPDF_LoadPage(document, page_index);
-                error = page == IntPtr.Zero ? GetLastErrorCore() : FPDF_ERR.SUCCESS;
+                // FPDF_LoadPage does not update FPDF_GetLastError
+                error = page == IntPtr.Zero ? FPDF_ERR.UNKNOWN : FPDF_ERR.SUCCESS;
                 return page;
             }
         }
@@ -369,7 +375,8 @@ namespace PDFtoImage.Internals
             lock (LockString)
             {
                 var bitmap = Imports.FPDFBitmap_CreateEx(width, height, (int)format, first_scan, stride);
-                error = bitmap == IntPtr.Zero ? GetLastErrorCore() : FPDF_ERR.SUCCESS;
+                // FPDFBitmap_CreateEx does not update FPDF_GetLastError
+                error = bitmap == IntPtr.Zero ? FPDF_ERR.UNKNOWN : FPDF_ERR.SUCCESS;
                 return bitmap;
             }
         }
