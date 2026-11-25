@@ -91,15 +91,15 @@ namespace PDFtoImage.Internals
             }
         }
 
-        private static (IntPtr form, IntPtr formFillInfoPtr) CreateFormEnvironment(IntPtr document)
+        private static unsafe (IntPtr form, IntPtr formFillInfoPtr) CreateFormEnvironment(IntPtr document)
         {
             var ffi = new NativeMethods.FPDF_FORMFILLINFO(1);
 
-            var formFillInfoPtr = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMethods.FPDF_FORMFILLINFO>());
+            var formFillInfoPtr = Marshal.AllocHGlobal(sizeof(NativeMethods.FPDF_FORMFILLINFO));
 
             try
             {
-                Marshal.StructureToPtr(ffi, formFillInfoPtr, false);
+                *(NativeMethods.FPDF_FORMFILLINFO*)formFillInfoPtr = ffi;
 
                 var form = NativeMethods.Doc_InitFormFillEnvironment(document, formFillInfoPtr);
 
@@ -181,7 +181,7 @@ namespace PDFtoImage.Internals
                 var page = NativeMethods.LoadPage(_document, pageNumber, out var error);
 
                 if (page == IntPtr.Zero)
-                    throw PdfException.CreateException(error) ?? new PdfPageNotFoundException();
+                    throw PdfException.CreateException(error) ?? new PdfUnknownException();
 
                 try
                 {
@@ -222,7 +222,7 @@ namespace PDFtoImage.Internals
             if (page != IntPtr.Zero)
                 return page;
 
-            throw PdfException.CreateException(error) ?? new PdfPageNotFoundException();
+            throw PdfException.CreateException(error) ?? new PdfUnknownException();
         }
 
         // Run the page-availability pass before the regular page APIs. For problematic linearized

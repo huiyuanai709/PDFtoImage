@@ -286,13 +286,15 @@ namespace PDFtoImage.Internals
                 try
                 {
                     stream.Position = position;
+                    // Cap each read so a large native request cannot pin a full-size array in the pool.
+                    // MemoryStream and mapped FileStream copies bypass this path.
 #if NETCOREAPP || NETSTANDARD2_1
                     var span = new Span<byte>((void*)destination, count);
                     var total = 0;
 
                     while (total < count)
                     {
-                        var read = stream.Read(span[total..]);
+                        var read = stream.Read(span.Slice(total, Math.Min(NativeMethods.RentedBufferSize, count - total)));
 
                         if (read <= 0)
                             return 0;
@@ -300,7 +302,7 @@ namespace PDFtoImage.Internals
                         total += read;
                     }
 #else
-                    var rented = System.Buffers.ArrayPool<byte>.Shared.Rent(count);
+                    var rented = System.Buffers.ArrayPool<byte>.Shared.Rent(Math.Min(count, NativeMethods.RentedBufferSize));
 
                     try
                     {
@@ -308,15 +310,14 @@ namespace PDFtoImage.Internals
 
                         while (total < count)
                         {
-                            var read = stream.Read(rented, total, count - total);
+                            var read = stream.Read(rented, 0, Math.Min(rented.Length, count - total));
 
                             if (read <= 0)
                                 return 0;
 
+                            Marshal.Copy(rented, 0, IntPtr.Add(destination, total), read);
                             total += read;
                         }
-
-                        Marshal.Copy(rented, 0, destination, count);
                     }
                     finally
                     {
